@@ -50,27 +50,22 @@ python rag_runner.py "What is exponential smoothing?"
 
 ## Configuration
 
-Copy `config_example.json` to `config.json` and edit:
+Copy `config_example.json` to `config.json` and edit. All settings are JSON strings unless noted.
 
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
-| `docs_dir` | yes | — | Directory containing `.txt` / `.md` files |
-| `chunk_size` | yes | — | Characters per text chunk |
-| `chunk_overlap` | yes | — | Overlapping characters between adjacent chunks |
-| `embedding_model_name` | yes | — | HuggingFace model ID for embeddings |
-| `chroma_persist_dir` | yes | — | Directory for the vector database |
-| `retrieval_k` | no | `5` | Number of relevant chunks to retrieve |
-| `api_base_url` | yes | — | Base URL of the OpenAI-compatible API |
-| `api_key` | yes | — | API key for the LLM service |
-| `llm_model` | yes | — | Model name to pass to the API |
-| `llm_temperature` | no | `0.3` | Sampling temperature |
-| `strict_context` | no | `false` | If `true`, LLM answers only from retrieved context; if `false`, LLM supplements with its own knowledge |
-| `system_rules` | no | `""` | Additional rules appended to the system prompt |
-
-### strict_context
-
-- `false` (default) — LLM uses retrieved context to enrich its answer but can also draw on its own knowledge. Best for general Q&A.
-- `true` — LLM answers **only** from the retrieved chunks. If no relevant chunks are found, it says "I don't know". Best for factual audit scenarios.
+| `docs_dir` | yes | `"./documents"` | Root directory for `.txt` / `.md` files. Supports nested subdirectories and `.doc_loader_ignore` filtering. |
+| `chunk_size` | yes | `500` | Character count per text chunk. Larger values preserve more context but may dilute retrieval precision; typical range: 300–1000. |
+| `chunk_overlap` | yes | `50` | Overlap in characters between adjacent chunks (recommended: 10–20% of `chunk_size`). Prevents semantic fragmentation at chunk boundaries. |
+| `embedding_model_name` | yes | `"mixedbread-ai/mxbai-embed-large-v1"` | HuggingFace model ID for embedding. The default produces 1024-dim vectors and balances speed/quality. |
+| `chroma_persist_dir` | yes | `"./chroma_db"` | Filesystem path for ChromaDB persistence. Automatically created on first build. |
+| `retrieval_k` | no | `5` | Number of top-ranked chunks returned per query. Higher values improve recall but increase prompt length and latency. |
+| `api_base_url` | yes | — | Endpoint URL of an OpenAI-compatible LLM API (e.g., DeepSeek, Azure OpenAI). |
+| `api_key` | yes | — | Authentication key for the LLM API. Keep this secret; `config.json` is gitignored by default. |
+| `llm_model` | yes | — | Model identifier recognized by the API (e.g., `"deepseek-chat"`). |
+| `llm_temperature` | no | `0.3` | Sampling temperature in `[0.0, 2.0]`. Lower → more deterministic; higher → more creative. Set near `0` for factual tasks. |
+| `strict_context` | no | `false` | **`false`** — LLM may blend retrieved context with its own knowledge (suitable for general Q&A).<br>**`true`** — LLM must answer **only** from retrieved chunks; replies "I don't know" when context is insufficient (suitable for audit/compliance scenarios). |
+| `system_rules` | no | `""` | Free-text instructions appended to the system prompt. Use to enforce output format, tone, or constraints (e.g., `"No emoji. Use $...$ for math."`). |
 
 ## Document Filtering
 
