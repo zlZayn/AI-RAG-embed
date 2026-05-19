@@ -95,7 +95,8 @@ def _export_round(
         text += f"{rewritten_question}\n"
         text += "```\n\n"
     text += f"**Answer:**\n\n{answer}\n\n"
-    text += "========== *Retrieved Context* ==========\n\n"
+    text += "========== *Retrieved Context* =========="
+    text += "\n\n"
     text += f"{context_blocks}\n"
 
     filepath = os.path.join(out_dir, f"{index:02d}_round.md")
@@ -111,9 +112,17 @@ def _retrieve_context(
     if query_enhancer:
         rewritten_question = query_enhancer.enhance(question)
 
+    # show lightweight progress prompt
+    # keep on same line while querying, then overwrite with result line
+    print(">> Retrieving... ", end="", flush=True)
     chunks = store.query(rewritten_question, k=retrieval_k)
     if not chunks:
+        # clear line and show skipped message
+        print("\r\033[K>> No relevant chunks found. Skipping.")
         return [], None, rewritten_question
+
+    # clear line and show retrieved + generating message (with newline so generation starts on next line)
+    print(f"\r\033[K>> Retrieved {len(chunks)} chunks. Generating...")
 
     context = "\n\n".join(chunks)
     messages = [
@@ -172,7 +181,6 @@ def cmd_ask(config: dict, question: str) -> None:
         query_enhancer,
     )
     if not chunks:
-        print("No relevant documents found.")
         return
 
     answer = ""
@@ -288,7 +296,6 @@ def cmd_chat(config: dict) -> None:
             query_enhancer,
         )
         if not chunks:
-            print("No relevant documents found.\n")
             continue
 
         answer = ""
