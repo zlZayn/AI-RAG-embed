@@ -4,20 +4,20 @@
 
 Local RAG system with two phases:
 
-- **Build** (`--build`) — ingest `.txt`/`.md` files from `documents/`, chunk them, embed them, and store in a Chroma vector database.
-- **Query** (interactive or single-shot) — embed the user's question, retrieve the top-k most relevant chunks, and send them as context to a remote LLM for answer generation.
+### Build Phase (`--build`)
 
-```text
-documents/  ──►  doc_loader  ──►  embed_engine  ──►  vector_db (Chroma)
-                                                       │
-question  ──►  embed_engine  ──►  vector_db.query()    │
-                                    │                  │
-                                    ▼                  │
-                              top-k chunks ──►  llm_api.generate()
-                                    │
-                                    ▼
-                              answer + export to output/
-```
+1. Load all `.txt` and `.md` files from `documents/` directory
+2. Split files into text chunks with sliding window overlap
+3. Convert chunks to vector embeddings using a local embedding model
+4. Store embeddings and original text in a Chroma vector database
+
+### Query Phase
+
+1. (Optional) Enhance user question: extract keywords and translate them to match document language
+2. Convert question (or enhanced question) to vector embedding
+3. Retrieve top-k most similar chunks from the vector database
+4. Send question + retrieved chunks to a remote LLM as context
+5. Generate answer and save to `output/` directory
 
 ## Directory Structure
 
@@ -32,27 +32,28 @@ lib/
 ├── __init__.py
 ├── doc_loader.py       # os.walk + sliding window chunking + ignore patterns
 ├── embed_engine.py     # SentenceTransformer wrapper
-├── vector_db.py        # Chroma PersistentClient operations
-└── llm_api.py          # openai.OpenAI wrapper
+├── vector_db.py       # Chroma PersistentClient operations
+├── llm_api.py         # openai.OpenAI wrapper
+└── query_enhancer.py  # query enhancement (keyword extraction + translation)
 ```
 
 ## Configuration
 
-`rag_runner.py` reads `config.json` at startup. No lib module reads the config directly — they receive only the parameters they need.
+`rag_runner.py` reads `config.json` at startup. No lib module reads the config directly -- they receive only the parameters they need.
 
 | Field | Group | Description |
 | --- | --- | --- |
 | `docs_dir` | Local data | Source document directory |
+| `docs_lang` | Local data | Target language for keyword translation |
 | `chunk_size` | Local data | Characters per chunk (sliding window) |
 | `chunk_overlap` | Local data | Overlapping characters between adjacent chunks |
 | `embedding_model_name` | Embedding | HuggingFace model ID |
 | `chroma_persist_dir` | Embedding | Chroma persistence directory |
-| `retrieval_k` | Embedding | Number of chunks to retrieve (default 3) |
-| `api_base_url` | LLM | OpenAI-compatible API base URL |
-| `api_key` | LLM | API key |
-| `llm_model` | LLM | Model name |
-| `llm_temperature` | LLM | Sampling temperature (default 0.3) |
-| `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (default) |
+| `retrieval_k` | Embedding | Number of chunks to retrieve (default: 3) |
+| `query_enhance_enabled` | Enhancement | Enable query enhancement |
+| `enhancer` | Enhancement | Enhancer model config (api_base_url, api_key, model, temperature, thinking_mode) |
+| `llm` | LLM | LLM model config (api_base_url, api_key, model, temperature, thinking_mode) |
+| `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge |
 | `system_rules` | Behavior | Additional system prompt rules (optional) |
 
 Relative paths (`./`) are resolved against the project root.
@@ -108,14 +109,17 @@ cmd_build()
 Both `cmd_ask` and `cmd_chat` share `_retrieve_and_ask()`:
 
 ```text
-_retrieve_and_ask(store, llm, question, system_prompt, retrieval_k, temperature)
+_retrieve_and_ask(store, llm, question, system_prompt, retrieval_k, query_enhancer=None)
+  ├─► [optional] query_enhancer.enhance(question)
+  │     └─► enhancer llm: extract keywords + translate to docs_lang
+  │
   ├─► store.query(question, k)
   │     ├─ embed_engine.get_embedding(question)  →  vector
   │     └─ collection.query(query_embeddings, n_results=k)
   │           Chroma cosine similarity search
   │           returns top-k document chunks
   │
-  └─► llm.generate(messages, temperature)
+  └─► llm.generate(messages)
         POST {base_url}/chat/completions
         messages: [system prompt, {user: "Context:\n{chunks}\n\nQuestion: {q}"}]
 ```
@@ -146,8 +150,8 @@ EmbedEngine(model_name)
 
 - Wraps `SentenceTransformer`.
 - Sets `HF_ENDPOINT=https://hf-mirror.com` via `os.environ.setdefault` (China mirror, does not override user-set values).
-- `get_embedding(text)` prepends the mxbai query prefix `"Represent this sentence for searching relevant passages: "` before encoding — required by the mxbai model family for query embeddings.
-- `embed_batch(texts)` does **not** add the prefix — document embeddings should be encoded as-is for correct semantic alignment with query embeddings.
+- `get_embedding(text)` prepends the mxbai query prefix `"Represent this sentence for searching relevant passages: "` before encoding -- required by the mxbai model family for query embeddings.
+- `embed_batch(texts)` does **not** add the prefix -- document embeddings should be encoded as-is for correct semantic alignment with query embeddings.
 
 ### lib/vector_db.py
 
@@ -164,12 +168,24 @@ VectorDb(persist_dir, embed_engine)
 ### lib/llm_api.py
 
 ```text
-LlmApi(api_key, base_url, model)
-  .generate(messages, temperature=0.3) -> str
+LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
+  .generate(messages) -> str
 ```
 
-- Thin wrapper over `openai.OpenAI`.
-- No retry logic — network errors propagate to caller.
+- Wraps `openai.OpenAI`.
+- Temperature and thinking_mode are set at initialization.
+- No retry logic -- network errors propagate to caller.
+
+### lib/query_enhancer.py
+
+```text
+QueryEnhancer(llm_api, docs_lang="en")
+  .enhance(question) -> tuple[str, list[str]]
+```
+
+- Calls enhancer LLM to extract keywords from user question.
+- Translates keywords to target language (`docs_lang`).
+- Returns (enhanced_question, extracted_tags).
 
 ## Output Export
 
@@ -183,35 +199,37 @@ output/<sanitized_question>_<YYYYMMDD_HHMMSS>/
 
 Each round file:
 
---- Round 1 ---
+========== *Round 1* ==========
 
-Question: ...
+**Question:** ...
 
-Answer:
+**Enhancer Trace:**
+
+- Tags: keyword1, keyword2
+- Enhanced Question: original question with Related terms appended
+
+**Answer:**
+
 ...
 
---- Retrieved Context ---
+========== *Retrieved Context* ==========
 
-```
+```text
 {chunk 1 content}
 ```
 
-```
+```text
 {chunk 2 content}
 ```
-
-... (one ``` block per retrieved chunk)
 
 ### Chunk Sanitization
 
 Retrieved chunks are sanitized before wrapping to prevent Markdown rendering corruption:
 
-1. `strip("`")` — removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
-2. `replace("```", "``")` — reduces any remaining triple-backtick to double-backtick (prevents premature fence closure).
+1. `strip("`")` -- removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
+2. `replace("```", "``")` -- reduces any remaining triple-backtick to double-backtick (prevents premature fence closure).
 
-After sanitization, the context block is wrapped in a standard 3-backtick fence.
-
-No `#`/`##` headings are used in the export format, because the LLM answer may contain its own headings.
+After sanitization, the context block is wrapped in a standard 3-backtick fence with `text` info string.
 
 ## Environment Setup
 

@@ -50,22 +50,46 @@ python rag_runner.py "What is exponential smoothing?"
 
 ## Configuration
 
-Copy `config_example.json` to `config.json` and edit. All settings are JSON strings unless noted.
+Copy `config_example.json` to `config.json` and edit.
 
-| Key | Required | Default | Description |
-| --- | --- | --- | --- |
-| `docs_dir` | yes | `"./documents"` | Root directory for `.txt` / `.md` files. Supports nested subdirectories and `.doc_loader_ignore` filtering. |
-| `chunk_size` | yes | `500` | Character count per text chunk. Larger values preserve more context but may dilute retrieval precision; typical range: 300–1000. |
-| `chunk_overlap` | yes | `50` | Overlap in characters between adjacent chunks (recommended: 10–20% of `chunk_size`). Prevents semantic fragmentation at chunk boundaries. |
-| `embedding_model_name` | yes | `"mixedbread-ai/mxbai-embed-large-v1"` | HuggingFace model ID for embedding. The default produces 1024-dim vectors and balances speed/quality. |
-| `chroma_persist_dir` | yes | `"./chroma_db"` | Filesystem path for ChromaDB persistence. Automatically created on first build. |
-| `retrieval_k` | no | `5` | Number of top-ranked chunks returned per query. Higher values improve recall but increase prompt length and latency. |
-| `api_base_url` | yes | — | Endpoint URL of an OpenAI-compatible LLM API (e.g., DeepSeek, Azure OpenAI). |
-| `api_key` | yes | — | Authentication key for the LLM API. Keep this secret; `config.json` is gitignored by default. |
-| `llm_model` | yes | — | Model identifier recognized by the API (e.g., `"deepseek-chat"`). |
-| `llm_temperature` | no | `0.3` | Sampling temperature in `[0.0, 2.0]`. Lower → more deterministic; higher → more creative. Set near `0` for factual tasks. |
-| `strict_context` | no | `false` | **`false`** — LLM may blend retrieved context with its own knowledge (suitable for general Q&A).<br>**`true`** — LLM must answer **only** from retrieved chunks; replies "I don't know" when context is insufficient (suitable for audit/compliance scenarios). |
-| `system_rules` | no | `""` | Free-text instructions appended to the system prompt. Use to enforce output format, tone, or constraints (e.g., `"No emoji. Use $...$ for math."`). |
+### Document & Retrieval Configuration
+
+| Key | Description |
+| --- | --- |
+| `docs_dir` | Root directory for your `.txt` / `.md` files. All files in this directory (and subdirectories) will be loaded when running `--build`. Supports `.doc_loader_ignore` filtering to exclude specific files. |
+| `docs_lang` | Target language for query enhancement. The enhancer will translate extracted keywords into this language to match your documents. Use `"en"` for English, `"zh"` for Chinese, etc. |
+| `chunk_size` | Number of characters per text chunk when building the vector index. Larger chunks preserve more context but may dilute retrieval precision. Typical range: 300-1000. |
+| `chunk_overlap` | Number of overlapping characters between adjacent chunks. Prevents semantic fragmentation when concepts span chunk boundaries. Recommended: 10-20% of `chunk_size`. |
+| `embedding_model_name` | HuggingFace model ID used to convert text chunks and queries into vector embeddings. |
+| `retrieval_k` | Number of top-ranked chunks retrieved for each query. More chunks provide more context but increase prompt length and LLM cost. Defaults to 3 if not set. |
+| `chroma_persist_dir` | Directory where the vector database is stored. Automatically created when running `--build`. |
+| `query_enhance_enabled` | Whether to enable query enhancement. When enabled, the enhancer extracts keywords from your question and translates them to `docs_lang`, then appends them to the query to improve retrieval accuracy. |
+| `strict_context` | Controls how the LLM uses its own knowledge. `false` = LLM may blend retrieved context with its own knowledge. `true` = LLM must answer **only** from retrieved chunks and will say "I don't know" if context is insufficient. |
+| `system_rules` | Free-text instructions that are always included in the system prompt. Use to enforce output format, tone, or constraints (e.g., "No emoji. Use $...$ for math formulas."). |
+
+### Enhancer Model Configuration (`enhancer`)
+
+The enhancer model extracts keywords from your question and translates them. Use a small, fast model for this.
+
+| Key | Description |
+| --- | --- |
+| `api_base_url` | API endpoint URL for the enhancer model (OpenAI-compatible). |
+| `api_key` | API key for authentication. Keep this secret. |
+| `model` | Model identifier (e.g., `"deepseek-chat"`, `"gpt-3.5-turbo"`). |
+| `temperature` | Sampling temperature for keyword extraction. Use `0.0` for deterministic results. |
+| `thinking_mode` | Enable thinking mode (if supported by your API). |
+
+### Answer Generation Model Configuration (`llm`)
+
+The LLM model generates the final answer from retrieved chunks.
+
+| Key | Description |
+| --- | --- |
+| `api_base_url` | API endpoint URL for the answer generation model (OpenAI-compatible). |
+| `api_key` | API key for authentication. Keep this secret. |
+| `model` | Model identifier (e.g., `"deepseek-chat"`, `"gpt-4"`). |
+| `temperature` | Sampling temperature for answer generation. Lower = more deterministic, higher = more creative. Range: 0.0-2.0. |
+| `thinking_mode` | Enable thinking mode (if supported by your API). |
 
 ## Document Filtering
 
@@ -91,7 +115,7 @@ output/
     └── 02_round.md
 ```
 
-Each round file contains the question, answer, and sanitized retrieved context (wrapped in a code fence to prevent Markdown corruption).
+Each round file contains the question, answer, enhancer trace (if query enhancement is enabled), and sanitized retrieved context (wrapped in a code fence to prevent Markdown corruption).
 
 ## Project Structure
 
@@ -106,7 +130,8 @@ lib/
 ├── doc_loader.py       # file I/O + text chunking + ignore patterns
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)
 ├── vector_db.py        # Chroma vector store operations
-└── llm_api.py          # remote LLM API client (OpenAI-compatible)
+├── llm_api.py          # remote LLM API client (OpenAI-compatible)
+└── query_enhancer.py   # query enhancement (keyword extraction + translation)
 ```
 
 ## Requirements

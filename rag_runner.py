@@ -81,65 +81,96 @@ def _export_round(
     question: str,
     chunks: list[str],
     answer: str,
+    tags: list[str] | None = None,
+    enhanced_question: str | None = None,
 ) -> None:
     safe_chunks = [_sanitize_chunk(c) for c in chunks]
-    context_blocks = "\n\n".join(f"```\n{c}\n```" for c in safe_chunks)
-    text = (
-        f"\n--- Round {index} ---\n\n"
-        f"Question: {question}\n\n"
-        f"Answer:\n\n{answer}\n\n"
-        f"--- Retrieved Context ---\n\n"
-        f"{context_blocks}\n"
-    )
+    context_blocks = "\n\n".join(f"```text\n{c}\n```" for c in safe_chunks)
+
+    text = f"========== *Round {index}* ==========\n\n"
+    text += f"**Question:** {question}\n\n"
+    if tags:
+        text += "**Enhancer Trace:**\n\n"
+        text += f"- Tags: {', '.join(tags)}\n"
+        text += f"- Enhanced Question: {enhanced_question}\n\n"
+    text += f"**Answer:**\n\n{answer}\n\n"
+    text += "========== *Retrieved Context* ==========\n\n"
+    text += f"{context_blocks}\n"
+
     filepath = os.path.join(out_dir, f"{index:02d}_round.md")
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(text)
 
 
-def _retrieve_and_ask(store, llm, question, system_prompt, retrieval_k, temperature):
-    chunks = store.query(question, k=retrieval_k)
+def _retrieve_and_ask(
+    store, llm, question, system_prompt, retrieval_k, query_enhancer=None
+):
+    tags = None
+    enhanced_question = question
+
+    if query_enhancer:
+        enhanced_question, tags = query_enhancer.enhance(question)
+
+    chunks = store.query(enhanced_question, k=retrieval_k)
     if not chunks:
-        return [], ""
+        return [], "", tags, enhanced_question
 
     context = "\n\n".join(chunks)
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
+        {
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion: {enhanced_question}",
+        },
     ]
 
-    answer = llm.generate(messages, temperature=temperature)
-    return chunks, answer
+    answer = llm.generate(messages)
+    return chunks, answer, tags, enhanced_question
 
 
 def cmd_ask(config: dict, question: str) -> None:
     EmbedEngine, LlmApi, VectorDb = _import_lib()
-    persist_dir = _resolve_path(config, "chroma_persist_dir")
-    model_name = config["embedding_model_name"]
-    retrieval_k = config.get("retrieval_k", 3)
-    temperature = config.get("llm_temperature", 0.3)
-    system_rules = config.get("system_rules", "")
-    strict_context = config.get("strict_context", False)
-    system_prompt = _build_system_prompt(system_rules, strict_context)
 
-    print("Loading embedding model...")
-    embed_engine = EmbedEngine(model_name=model_name)
-
-    print("Loading vector store...")
-    store = VectorDb(persist_dir=persist_dir, embed_engine=embed_engine)
-
-    llm = LlmApi(
-        api_key=config["api_key"],
-        base_url=config["api_base_url"],
-        model=config["llm_model"],
+    embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
+    store = VectorDb(
+        persist_dir=_resolve_path(config, "chroma_persist_dir"),
+        embed_engine=embed_engine,
     )
 
-    chunks, answer = _retrieve_and_ask(
+    llm = LlmApi(
+        api_key=config["llm"]["api_key"],
+        base_url=config["llm"]["api_base_url"],
+        model=config["llm"]["model"],
+        temperature=config["llm"].get("temperature", 0.3),
+        thinking_mode=config["llm"].get("thinking_mode", False),
+    )
+
+    query_enhancer = None
+    if config.get("query_enhance_enabled", False):
+        from lib.query_enhancer import QueryEnhancer
+
+        enhancer_llm = LlmApi(
+            api_key=config["enhancer"]["api_key"],
+            base_url=config["enhancer"]["api_base_url"],
+            model=config["enhancer"]["model"],
+            temperature=config["enhancer"].get("temperature", 0.0),
+            thinking_mode=config["enhancer"].get("thinking_mode", False),
+        )
+        query_enhancer = QueryEnhancer(
+            enhancer_llm, docs_lang=config.get("docs_lang", "en")
+        )
+
+    system_prompt = _build_system_prompt(
+        config.get("system_rules", ""), config.get("strict_context", False)
+    )
+
+    chunks, answer, tags, enhanced_question = _retrieve_and_ask(
         store,
         llm,
         question,
         system_prompt,
-        retrieval_k,
-        temperature,
+        config.get("retrieval_k", 3),
+        query_enhancer,
     )
     if not chunks:
         print("No relevant documents found.")
@@ -148,7 +179,7 @@ def cmd_ask(config: dict, question: str) -> None:
     print(f"\n{answer}\n")
 
     out_dir = _init_output_dir(question)
-    _export_round(out_dir, 1, question, chunks, answer)
+    _export_round(out_dir, 1, question, chunks, answer, tags, enhanced_question)
     print(f"Saved to {out_dir}")
 
 
@@ -194,24 +225,38 @@ def cmd_build(config: dict) -> None:
 
 def cmd_chat(config: dict) -> None:
     EmbedEngine, LlmApi, VectorDb = _import_lib()
-    persist_dir = _resolve_path(config, "chroma_persist_dir")
-    model_name = config["embedding_model_name"]
-    retrieval_k = config.get("retrieval_k", 3)
-    temperature = config.get("llm_temperature", 0.3)
-    system_rules = config.get("system_rules", "")
-    strict_context = config.get("strict_context", False)
-    system_prompt = _build_system_prompt(system_rules, strict_context)
 
-    print("Loading embedding model...")
-    embed_engine = EmbedEngine(model_name=model_name)
-
-    print("Loading vector store...")
-    store = VectorDb(persist_dir=persist_dir, embed_engine=embed_engine)
+    embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
+    store = VectorDb(
+        persist_dir=_resolve_path(config, "chroma_persist_dir"),
+        embed_engine=embed_engine,
+    )
 
     llm = LlmApi(
-        api_key=config["api_key"],
-        base_url=config["api_base_url"],
-        model=config["llm_model"],
+        api_key=config["llm"]["api_key"],
+        base_url=config["llm"]["api_base_url"],
+        model=config["llm"]["model"],
+        temperature=config["llm"].get("temperature", 0.3),
+        thinking_mode=config["llm"].get("thinking_mode", False),
+    )
+
+    query_enhancer = None
+    if config.get("query_enhance_enabled", False):
+        from lib.query_enhancer import QueryEnhancer
+
+        enhancer_llm = LlmApi(
+            api_key=config["enhancer"]["api_key"],
+            base_url=config["enhancer"]["api_base_url"],
+            model=config["enhancer"]["model"],
+            temperature=config["enhancer"].get("temperature", 0.0),
+            thinking_mode=config["enhancer"].get("thinking_mode", False),
+        )
+        query_enhancer = QueryEnhancer(
+            enhancer_llm, docs_lang=config.get("docs_lang", "en")
+        )
+
+    system_prompt = _build_system_prompt(
+        config.get("system_rules", ""), config.get("strict_context", False)
     )
 
     print("Ready. Type your question (or /exit /quit /q to quit).\n")
@@ -231,13 +276,13 @@ def cmd_chat(config: dict) -> None:
         if question in ("/exit", "/quit", "/q"):
             break
 
-        chunks, answer = _retrieve_and_ask(
+        chunks, answer, tags, enhanced_question = _retrieve_and_ask(
             store,
             llm,
             question,
             system_prompt,
-            retrieval_k,
-            temperature,
+            config.get("retrieval_k", 3),
+            query_enhancer,
         )
         if not chunks:
             print("No relevant documents found.\n")
@@ -248,7 +293,9 @@ def cmd_chat(config: dict) -> None:
         if out_dir is None:
             out_dir = _init_output_dir(question)
         round_index += 1
-        _export_round(out_dir, round_index, question, chunks, answer)
+        _export_round(
+            out_dir, round_index, question, chunks, answer, tags, enhanced_question
+        )
 
 
 def main() -> None:
