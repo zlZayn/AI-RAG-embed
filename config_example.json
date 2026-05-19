@@ -1,14 +1,26 @@
 {
     "docs_dir": "./documents",
+    "docs_lang": "en",
     "chunk_size": 500,
     "chunk_overlap": 50,
-    "retrieval_k": 5,
     "embedding_model_name": "mixedbread-ai/mxbai-embed-large-v1",
+    "retrieval_k": 5,
     "chroma_persist_dir": "./chroma_db",
-    "api_base_url": "https://api.deepseek.com/v1",
-    "api_key": "sk-your-api-key-here",
-    "llm_model": "deepseek-chat",
-    "llm_temperature": 0.3,
+    "query_enhance_enabled": true,
+    "enhancer": {
+        "api_base_url": "https://api.deepseek.com",
+        "api_key": "sk-your-api-key-here",
+        "model": "deepseek-v4-flash",
+        "temperature": 0.0,
+        "thinking_mode": false
+    },
+    "llm": {
+        "api_base_url": "https://api.deepseek.com",
+        "api_key": "tp-your-api-key-here",
+        "model": "deepseek-v4-flash",
+        "temperature": 0.3,
+        "thinking_mode": false
+    },
     "strict_context": false,
-    "system_rules": "No emoji. No ASCII art diagrams.\nUse concise markdown syntax. Wrap math formulas in $...$ or $$...$$."
+    "system_rules": "No emoji. No ASCII art diagrams.\nAnswer directly as if the knowledge is your own. Do not say phrases like '根据您提供的上下文', 'Based on the context', 'From the retrieved information', or any similar phrasing.\nUse standard markdown headings (start with #, then ##, then ###).\nUse concise markdown syntax. Wrap math formulas in $...$ or $$...$$.\n\nMarkdown formatting rules:\n- Always surround headings with blank lines\n- Always surround fenced code blocks with blank lines\n- Always surround lists with blank lines\n- Never have more than one consecutive blank line"
 }
