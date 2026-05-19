@@ -1,0 +1,14 @@
+{
+    "docs_dir": "./documents",
+    "chunk_size": 500,
+    "chunk_overlap": 50,
+    "retrieval_k": 5,
+    "embedding_model_name": "mixedbread-ai/mxbai-embed-large-v1",
+    "chroma_persist_dir": "./chroma_db",
+    "api_base_url": "https://api.deepseek.com/v1",
+    "api_key": "sk-your-api-key-here",
+    "llm_model": "deepseek-chat",
+    "llm_temperature": 0.3,
+    "strict_context": false,
+    "system_rules": "No emoji. No ASCII art diagrams.\nUse concise markdown syntax. Wrap math formulas in $...$ or $$...$$."
+}
