@@ -8,32 +8,18 @@ class QueryEnhancer:
         self._prompt = self._build_prompt()
 
     def _build_prompt(self) -> str:
-        return f"""Extract key technical terms from the user's question.
-Rules:
-1. Only extract terms that appear explicitly in the question
-2. Do NOT infer, expand, or add related terms
-3. Translate each term to {self._docs_lang}
-4. Output format: JSON array, no explanation
+        return f"""Translate the following question to {self._docs_lang}. Keep the original meaning.
+If the question contains technical terms in another language, replace them with their {self._docs_lang} equivalents.
+Output only the translated question, no explanation.
 
 Question: {{question}}
 Output:"""
 
-    def enhance(self, question: str) -> tuple[str, list[str]]:
-        tags = self._extract_tags(question)
-        if tags:
-            enhanced_question = f"{question}\n\nRelated terms: {', '.join(tags)}"
-            return enhanced_question, tags
-        return question, tags
-
-    def _extract_tags(self, question: str) -> list[str]:
+    def enhance(self, question: str) -> str:
         messages = [{"role": "user", "content": self._prompt.format(question=question)}]
-        response = self._llm.generate(messages)
         try:
-            import json
-
-            tags = json.loads(response)
-            if isinstance(tags, list):
-                return [str(t).strip() for t in tags if t]
-            return []
+            response = self._llm.generate(messages)
+            response = response.strip()
+            return response if response else question
         except Exception:
-            return []
+            return question

@@ -16,14 +16,21 @@ class LlmApi:
         self._thinking_mode = thinking_mode
 
     def generate(self, messages: list[dict]) -> str:
+        return "".join(self.generate_stream(messages))
+
+    def generate_stream(self, messages: list[dict]):
         extra_body = {}
         if self._thinking_mode:
             extra_body["thinking_mode"] = True
 
-        response = self._client.chat.completions.create(
+        stream = self._client.chat.completions.create(
             model=self._model,
             messages=messages,
             temperature=self._temperature,
             extra_body=extra_body if extra_body else None,
+            stream=True,
         )
-        return response.choices[0].message.content
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content

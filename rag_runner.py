@@ -81,18 +81,19 @@ def _export_round(
     question: str,
     chunks: list[str],
     answer: str,
-    tags: list[str] | None = None,
-    enhanced_question: str | None = None,
+    rewritten_question: str | None = None,
 ) -> None:
     safe_chunks = [_sanitize_chunk(c) for c in chunks]
     context_blocks = "\n\n".join(f"```text\n{c}\n```" for c in safe_chunks)
 
     text = f"========== *Round {index}* ==========\n\n"
-    text += f"**Question:** {question}\n\n"
-    if tags:
-        text += "**Enhancer Trace:**\n\n"
-        text += f"- Tags: {', '.join(tags)}\n"
-        text += f"- Enhanced Question: {enhanced_question}\n\n"
+    text += "**Question:**\n\n```text\n"
+    text += f"{question}\n"
+    text += "```\n\n"
+    if rewritten_question and rewritten_question != question:
+        text += "**Enhanced Question:**\n\n```text\n"
+        text += f"{rewritten_question}\n"
+        text += "```\n\n"
     text += f"**Answer:**\n\n{answer}\n\n"
     text += "========== *Retrieved Context* ==========\n\n"
     text += f"{context_blocks}\n"
@@ -102,30 +103,28 @@ def _export_round(
         f.write(text)
 
 
-def _retrieve_and_ask(
+def _retrieve_context(
     store, llm, question, system_prompt, retrieval_k, query_enhancer=None
 ):
-    tags = None
-    enhanced_question = question
+    rewritten_question = question
 
     if query_enhancer:
-        enhanced_question, tags = query_enhancer.enhance(question)
+        rewritten_question = query_enhancer.enhance(question)
 
-    chunks = store.query(enhanced_question, k=retrieval_k)
+    chunks = store.query(rewritten_question, k=retrieval_k)
     if not chunks:
-        return [], "", tags, enhanced_question
+        return [], None, rewritten_question
 
     context = "\n\n".join(chunks)
     messages = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": f"Context:\n{context}\n\nQuestion: {enhanced_question}",
+            "content": f"Context:\n{context}\n\nQuestion: {rewritten_question}",
         },
     ]
 
-    answer = llm.generate(messages)
-    return chunks, answer, tags, enhanced_question
+    return chunks, messages, rewritten_question
 
 
 def cmd_ask(config: dict, question: str) -> None:
@@ -164,7 +163,7 @@ def cmd_ask(config: dict, question: str) -> None:
         config.get("system_rules", ""), config.get("strict_context", False)
     )
 
-    chunks, answer, tags, enhanced_question = _retrieve_and_ask(
+    chunks, messages, rewritten_question = _retrieve_context(
         store,
         llm,
         question,
@@ -176,11 +175,15 @@ def cmd_ask(config: dict, question: str) -> None:
         print("No relevant documents found.")
         return
 
-    print(f"\n{answer}\n")
+    answer = ""
+    for token in llm.generate_stream(messages):
+        print(token, end="", flush=True)
+        answer += token
+    print()
 
     out_dir = _init_output_dir(question)
-    _export_round(out_dir, 1, question, chunks, answer, tags, enhanced_question)
-    print(f"Saved to {out_dir}")
+    _export_round(out_dir, 1, question, chunks, answer, rewritten_question)
+    print(f"\nSaved to {out_dir}")
 
 
 def cmd_build(config: dict) -> None:
@@ -276,7 +279,7 @@ def cmd_chat(config: dict) -> None:
         if question in ("/exit", "/quit", "/q"):
             break
 
-        chunks, answer, tags, enhanced_question = _retrieve_and_ask(
+        chunks, messages, rewritten_question = _retrieve_context(
             store,
             llm,
             question,
@@ -288,13 +291,17 @@ def cmd_chat(config: dict) -> None:
             print("No relevant documents found.\n")
             continue
 
-        print(f"\n{answer}\n")
+        answer = ""
+        for token in llm.generate_stream(messages):
+            print(token, end="", flush=True)
+            answer += token
+        print()
 
         if out_dir is None:
             out_dir = _init_output_dir(question)
         round_index += 1
         _export_round(
-            out_dir, round_index, question, chunks, answer, tags, enhanced_question
+            out_dir, round_index, question, chunks, answer, rewritten_question
         )
 
 

@@ -13,7 +13,7 @@ Local RAG system with two phases:
 
 ### Query Phase
 
-1. (Optional) Enhance user question: extract keywords and translate them to match document language
+1. (Optional) Enhance user question: translate and rephrase it to match document language
 2. Convert question (or enhanced question) to vector embedding
 3. Retrieve top-k most similar chunks from the vector database
 4. Send question + retrieved chunks to a remote LLM as context
@@ -34,7 +34,7 @@ lib/
 ├── embed_engine.py     # SentenceTransformer wrapper
 ├── vector_db.py       # Chroma PersistentClient operations
 ├── llm_api.py         # openai.OpenAI wrapper
-└── query_enhancer.py  # query enhancement (keyword extraction + translation)
+└── query_enhancer.py  # query enhancement (question translation + rewording)
 ```
 
 ## Configuration
@@ -44,7 +44,7 @@ lib/
 | Field | Group | Description |
 | --- | --- | --- |
 | `docs_dir` | Local data | Source document directory |
-| `docs_lang` | Local data | Target language for keyword translation |
+| `docs_lang` | Local data | Target language for question translation |
 | `chunk_size` | Local data | Characters per chunk (sliding window) |
 | `chunk_overlap` | Local data | Overlapping characters between adjacent chunks |
 | `embedding_model_name` | Embedding | HuggingFace model ID |
@@ -106,22 +106,22 @@ cmd_build()
 
 ## Query Workflow
 
-Both `cmd_ask` and `cmd_chat` share `_retrieve_and_ask()`:
+Both `cmd_ask` and `cmd_chat` share `_retrieve_context()`:
 
 ```text
-_retrieve_and_ask(store, llm, question, system_prompt, retrieval_k, query_enhancer=None)
+_retrieve_context(store, llm, question, system_prompt, retrieval_k, query_enhancer=None)
   ├─► [optional] query_enhancer.enhance(question)
-  │     └─► enhancer llm: extract keywords + translate to docs_lang
+  │     └─► enhancer llm: translate + rephrase question to docs_lang
   │
-  ├─► store.query(question, k)
-  │     ├─ embed_engine.get_embedding(question)  →  vector
+  ├─► store.query(rewritten_question, k)
+  │     ├─ embed_engine.get_embedding(rewritten_question)  →  vector
   │     └─ collection.query(query_embeddings, n_results=k)
   │           Chroma cosine similarity search
   │           returns top-k document chunks
   │
-  └─► llm.generate(messages)
-        POST {base_url}/chat/completions
-        messages: [system prompt, {user: "Context:\n{chunks}\n\nQuestion: {q}"}]
+  └─► llm.generate_stream(messages)
+        POST {base_url}/chat/completions (stream=True)
+        messages: [system prompt, {user: "Context:\n{chunks}\n\nQuestion: {rewritten_question}"}]
 ```
 
 If no relevant chunks are found, the system prints a message and skips the round.
@@ -180,12 +180,12 @@ LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
 
 ```text
 QueryEnhancer(llm_api, docs_lang="en")
-  .enhance(question) -> tuple[str, list[str]]
+  .enhance(question) -> str
 ```
 
-- Calls enhancer LLM to extract keywords from user question.
-- Translates keywords to target language (`docs_lang`).
-- Returns (enhanced_question, extracted_tags).
+- Calls enhancer LLM to translate and rephrase the user question into `docs_lang`.
+- Replaces technical terms with their `docs_lang` equivalents.
+- Returns the rewritten question as a single string.
 
 ## Output Export
 
@@ -201,12 +201,17 @@ Each round file:
 
 ========== *Round 1* ==========
 
-**Question:** ...
+**Question:**
 
-**Enhancer Trace:**
+```text
+{original question}
+```
 
-- Tags: keyword1, keyword2
-- Enhanced Question: original question with Related terms appended
+**Enhanced Question:**
+
+```text
+{translated and reworded question}
+```
 
 **Answer:**
 

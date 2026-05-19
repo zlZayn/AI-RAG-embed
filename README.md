@@ -57,26 +57,26 @@ Copy `config_example.json` to `config.json` and edit.
 | Key | Description |
 | --- | --- |
 | `docs_dir` | Root directory for your `.txt` / `.md` files. All files in this directory (and subdirectories) will be loaded when running `--build`. Supports `.doc_loader_ignore` filtering to exclude specific files. |
-| `docs_lang` | Target language for query enhancement. The enhancer will translate extracted keywords into this language to match your documents. Use `"en"` for English, `"zh"` for Chinese, etc. |
+| `docs_lang` | Target language for query enhancement. The enhancer will translate and rephrase the question into this language to match your documents. Use `"en"` for English, `"zh"` for Chinese, etc. |
 | `chunk_size` | Number of characters per text chunk when building the vector index. Larger chunks preserve more context but may dilute retrieval precision. Typical range: 300-1000. |
 | `chunk_overlap` | Number of overlapping characters between adjacent chunks. Prevents semantic fragmentation when concepts span chunk boundaries. Recommended: 10-20% of `chunk_size`. |
 | `embedding_model_name` | HuggingFace model ID used to convert text chunks and queries into vector embeddings. |
 | `retrieval_k` | Number of top-ranked chunks retrieved for each query. More chunks provide more context but increase prompt length and LLM cost. Defaults to 3 if not set. |
 | `chroma_persist_dir` | Directory where the vector database is stored. Automatically created when running `--build`. |
-| `query_enhance_enabled` | Whether to enable query enhancement. When enabled, the enhancer extracts keywords from your question and translates them to `docs_lang`, then appends them to the query to improve retrieval accuracy. |
+| `query_enhance_enabled` | Whether to enable query enhancement. When enabled, the enhancer translates and rephrases the question into `docs_lang`, replacing technical terms with their equivalents, to improve retrieval accuracy. |
 | `strict_context` | Controls how the LLM uses its own knowledge. `false` = LLM may blend retrieved context with its own knowledge. `true` = LLM must answer **only** from retrieved chunks and will say "I don't know" if context is insufficient. |
 | `system_rules` | Free-text instructions that are always included in the system prompt. Use to enforce output format, tone, or constraints (e.g., "No emoji. Use $...$ for math formulas."). |
 
 ### Enhancer Model Configuration (`enhancer`)
 
-The enhancer model extracts keywords from your question and translates them. Use a small, fast model for this.
+The enhancer model translates and rephrases the user's question into the document language, replacing technical terms with their equivalents. Use a small, fast model for this.
 
 | Key | Description |
 | --- | --- |
 | `api_base_url` | API endpoint URL for the enhancer model (OpenAI-compatible). |
 | `api_key` | API key for authentication. Keep this secret. |
 | `model` | Model identifier (e.g., `"deepseek-chat"`, `"gpt-3.5-turbo"`). |
-| `temperature` | Sampling temperature for keyword extraction. Use `0.0` for deterministic results. |
+| `temperature` | Sampling temperature for translation. Use `0.0` for deterministic results. |
 | `thinking_mode` | Enable thinking mode (if supported by your API). |
 
 ### Answer Generation Model Configuration (`llm`)
@@ -115,7 +115,7 @@ output/
     └── 02_round.md
 ```
 
-Each round file contains the question, answer, enhancer trace (if query enhancement is enabled), and sanitized retrieved context (wrapped in a code fence to prevent Markdown corruption).
+Each round file contains the question, answer, enhanced question trace (if query enhancement is enabled), and sanitized retrieved context -- each wrapped in a code fence to prevent Markdown corruption.
 
 ## Project Structure
 
@@ -131,7 +131,7 @@ lib/
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)
 ├── vector_db.py        # Chroma vector store operations
 ├── llm_api.py          # remote LLM API client (OpenAI-compatible)
-└── query_enhancer.py   # query enhancement (keyword extraction + translation)
+└── query_enhancer.py   # query enhancement (question translation + rewording)
 ```
 
 ## Requirements
