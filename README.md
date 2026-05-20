@@ -29,7 +29,7 @@ python rag_runner.py
 python rag_runner.py --build
 ```
 
-**Interactive mode** (multi-turn conversation):
+**Interactive mode** (multi-turn conversation with history):
 
 ```bash
 python rag_runner.py
@@ -38,6 +38,9 @@ python rag_runner.py
 ```text
 >>> What is exponential smoothing?
 Exponential smoothing is a forecasting method...
+
+>>> How many types are there?
+The system understands "types" refers to exponential smoothing types from our previous discussion.
 
 >>> /exit
 ```
@@ -63,7 +66,7 @@ Copy `config_example.json` to `config.json` and edit.
 | `embedding_model_name` | HuggingFace model ID used to convert text chunks and queries into vector embeddings. |
 | `retrieval_k` | Number of top-ranked chunks retrieved for each query. More chunks provide more context but increase prompt length and LLM cost. Defaults to 3 if not set. |
 | `chroma_persist_dir` | Directory where the vector database is stored. Automatically created when running `--build`. |
-| `query_enhance_enabled` | Whether to enable query enhancement. When enabled, the enhancer translates and rephrases the question into `docs_lang`, replacing technical terms with their equivalents, to improve retrieval accuracy. |
+| `query_enhance_enabled` | Whether to enable query enhancement. When enabled, the enhancer translates and rephrases the question into `docs_lang`, replacing technical terms with their equivalents, to improve retrieval accuracy. In interactive mode, conversation history is used to resolve pronouns and ellipsis (e.g., "what about the second type" → fully rewritten standalone query). |
 | `strict_context` | Controls how the LLM uses its own knowledge. `false` = LLM may blend retrieved context with its own knowledge. `true` = LLM must answer **only** from retrieved chunks and will say "I don't know" if context is insufficient. |
 | `system_rules` | Free-text instructions that are always included in the system prompt. Use to enforce output format, tone, or constraints (e.g., "No emoji. Use $...$ for math formulas."). |
 

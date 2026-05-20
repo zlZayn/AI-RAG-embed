@@ -105,46 +105,63 @@ def _export_round(
 
 
 def _retrieve_context(
-    store, llm, question, system_prompt, retrieval_k, query_enhancer=None
+    store,
+    llm,
+    question,
+    system_prompt,
+    retrieval_k,
+    query_enhancer=None,
+    messages_history=None,
 ):
     rewritten_question = question
 
-    if query_enhancer:
-        rewritten_question = query_enhancer.enhance(question)
+    print(">> Processing... ", end="", flush=True)
 
-    # show lightweight progress prompt
-    # keep on same line while querying, then overwrite with result line
-    print(">> Retrieving... ", end="", flush=True)
+    if query_enhancer:
+        rewritten_question = query_enhancer.enhance(question, messages_history)
+
+    print("\r\033[K>> Retrieving... ", end="", flush=True)
     chunks = store.query(rewritten_question, k=retrieval_k)
     if not chunks:
-        # clear line and show skipped message
-        print("\r\033[K>> No relevant chunks found. Skipping.")
+        print("\r\033[K>> No relevant chunks found. Skipping.\n")
         return [], None, rewritten_question
 
-    # clear line and show retrieved + generating message (with newline so generation starts on next line)
     print(f"\r\033[K>> Retrieved {len(chunks)} chunks. Generating...")
 
     context = "\n\n".join(chunks)
-    messages = [
-        {"role": "system", "content": system_prompt},
+    messages = [{"role": "system", "content": system_prompt}]
+    if messages_history:
+        messages.extend(messages_history)
+    messages.append(
         {
             "role": "user",
-            "content": f"Context:\n{context}\n\nQuestion: {rewritten_question}",
+            "content": f"Context:\n{context}\n\nQuestion: {question}",
         },
-    ]
+    )
 
     return chunks, messages, rewritten_question
 
 
-def cmd_ask(config: dict, question: str) -> None:
+def _init_ask_chat(config: dict):
     EmbedEngine, LlmApi, VectorDb = _import_lib()
 
+    t0 = time.perf_counter()
+    print(">> Loading embedding model... ", end="", flush=True)
     embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
+    print(
+        f"\r\033[K>> Loading embedding model... done  [{time.perf_counter() - t0:.1f}s]"
+    )
+
+    t0 = time.perf_counter()
+    print(">> Loading vector index... ", end="", flush=True)
     store = VectorDb(
         persist_dir=_resolve_path(config, "chroma_persist_dir"),
         embed_engine=embed_engine,
     )
+    print(f"\r\033[K>> Loading vector index... done  [{time.perf_counter() - t0:.1f}s]")
 
+    t0 = time.perf_counter()
+    print(">> Initializing LLM... ", end="", flush=True)
     llm = LlmApi(
         api_key=config["llm"]["api_key"],
         base_url=config["llm"]["api_base_url"],
@@ -152,6 +169,7 @@ def cmd_ask(config: dict, question: str) -> None:
         temperature=config["llm"].get("temperature", 0.3),
         thinking_mode=config["llm"].get("thinking_mode", False),
     )
+    print(f"\r\033[K>> Initializing LLM... done  [{time.perf_counter() - t0:.1f}s]")
 
     query_enhancer = None
     if config.get("query_enhance_enabled", False):
@@ -171,6 +189,12 @@ def cmd_ask(config: dict, question: str) -> None:
     system_prompt = _build_system_prompt(
         config.get("system_rules", ""), config.get("strict_context", False)
     )
+
+    return store, llm, query_enhancer, system_prompt
+
+
+def cmd_ask(config: dict, question: str) -> None:
+    store, llm, query_enhancer, system_prompt = _init_ask_chat(config)
 
     chunks, messages, rewritten_question = _retrieve_context(
         store,
@@ -203,10 +227,10 @@ def cmd_build(config: dict) -> None:
     model_name = config["embedding_model_name"]
 
     if not os.path.isdir(docs_dir):
-        print(f"Documents directory not found: {docs_dir}")
+        print(f">> Error: documents directory not found: {docs_dir}")
         sys.exit(1)
 
-    print("Loading and chunking documents...")
+    print(">> Loading and chunking documents... ", end="", flush=True)
     t1 = time.perf_counter()
     chunks = load_documents(
         docs_dir,
@@ -214,66 +238,40 @@ def cmd_build(config: dict) -> None:
         chunk_overlap=config["chunk_overlap"],
     )
     if not chunks:
-        print("No .txt or .md files found in documents directory.")
+        print("\r\033[K>> No .txt or .md files found in documents directory.")
         sys.exit(1)
     print(
-        f"  {len(chunks)} chunks from {len({c['source'] for c in chunks})} files  [{time.perf_counter() - t1:.1f}s]"
+        f"\r\033[K>> Loading and chunking documents... "
+        f"{len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
+        f"  [{time.perf_counter() - t1:.1f}s]"
     )
 
-    print("Loading embedding model...")
+    print(">> Loading embedding model... ", end="", flush=True)
     t2 = time.perf_counter()
     embed_engine = EmbedEngine(model_name=model_name)
-    print(f"  model ready  [{time.perf_counter() - t2:.1f}s]")
+    print(
+        f"\r\033[K>> Loading embedding model... done  [{time.perf_counter() - t2:.1f}s]"
+    )
 
-    print("Building vector index...")
+    print(">> Building vector index... ", end="", flush=True)
     t3 = time.perf_counter()
     store = VectorDb(persist_dir=persist_dir, embed_engine=embed_engine)
     store.rebuild(chunks)
-    print(f"  index saved to {persist_dir}  [{time.perf_counter() - t3:.1f}s]")
+    print(
+        f"\r\033[K>> Building vector index... done  [{time.perf_counter() - t3:.1f}s]"
+    )
 
-    print(f"\nBuild complete  [{time.perf_counter() - t0:.1f}s total]")
+    print(f"\r\033[K>> Build complete  [{time.perf_counter() - t0:.1f}s total]")
 
 
 def cmd_chat(config: dict) -> None:
-    EmbedEngine, LlmApi, VectorDb = _import_lib()
+    store, llm, query_enhancer, system_prompt = _init_ask_chat(config)
 
-    embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
-    store = VectorDb(
-        persist_dir=_resolve_path(config, "chroma_persist_dir"),
-        embed_engine=embed_engine,
-    )
-
-    llm = LlmApi(
-        api_key=config["llm"]["api_key"],
-        base_url=config["llm"]["api_base_url"],
-        model=config["llm"]["model"],
-        temperature=config["llm"].get("temperature", 0.3),
-        thinking_mode=config["llm"].get("thinking_mode", False),
-    )
-
-    query_enhancer = None
-    if config.get("query_enhance_enabled", False):
-        from lib.query_enhancer import QueryEnhancer
-
-        enhancer_llm = LlmApi(
-            api_key=config["enhancer"]["api_key"],
-            base_url=config["enhancer"]["api_base_url"],
-            model=config["enhancer"]["model"],
-            temperature=config["enhancer"].get("temperature", 0.0),
-            thinking_mode=config["enhancer"].get("thinking_mode", False),
-        )
-        query_enhancer = QueryEnhancer(
-            enhancer_llm, docs_lang=config.get("docs_lang", "en")
-        )
-
-    system_prompt = _build_system_prompt(
-        config.get("system_rules", ""), config.get("strict_context", False)
-    )
-
-    print("Ready. Type your question (or /exit /quit /q to quit).\n")
+    print("\nReady. Type your question (or /exit /quit /q to quit).\n")
 
     out_dir = None
     round_index = 0
+    history = []
 
     while True:
         try:
@@ -294,6 +292,7 @@ def cmd_chat(config: dict) -> None:
             system_prompt,
             config.get("retrieval_k", 3),
             query_enhancer,
+            messages_history=history,
         )
         if not chunks:
             continue
@@ -303,6 +302,9 @@ def cmd_chat(config: dict) -> None:
             print(token, end="", flush=True)
             answer += token
         print()
+
+        history.append({"role": "user", "content": question})
+        history.append({"role": "assistant", "content": answer})
 
         if out_dir is None:
             out_dir = _init_output_dir(question)

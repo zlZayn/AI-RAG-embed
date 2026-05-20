@@ -13,10 +13,10 @@ Local RAG system with two phases:
 
 ### Query Phase
 
-1. (Optional) Enhance user question: translate and rephrase it to match document language
-2. Convert question (or enhanced question) to vector embedding
+1. (Optional) Enhance user question: translate and rephrase (with conversation history if available) to improve retrieval
+2. Convert enhanced question to vector embedding
 3. Retrieve top-k most similar chunks from the vector database
-4. Send question + retrieved chunks to a remote LLM as context
+4. Send **original** question + retrieved chunks to a remote LLM as context (enhanced question is retrieval-only, preserving the user's language for the answer)
 5. Generate answer and save to `output/` directory
 
 ## Directory Structure
@@ -80,7 +80,7 @@ python rag_runner.py "question"   →  cmd_ask()     (single-shot)
 python rag_runner.py --build      →  cmd_build()   (build index)
 ```
 
-Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded inside `_import_lib()` at the start of each `cmd_*` function. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
+Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`; `cmd_build` calls it directly. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
 
 ## Build Workflow
 
@@ -106,22 +106,34 @@ cmd_build()
 
 ## Query Workflow
 
-Both `cmd_ask` and `cmd_chat` share `_retrieve_context()`:
+Both `cmd_ask` and `cmd_chat` share `_init_ask_chat()` for engine initialization and `_retrieve_context()` for retrieval.
+`cmd_chat` additionally maintains a `history` list across rounds and passes it for context-aware enhancement and message construction.
 
 ```text
-_retrieve_context(store, llm, question, system_prompt, retrieval_k, query_enhancer=None)
-  ├─► [optional] query_enhancer.enhance(question)
+_retrieve_context(store, llm, question, system_prompt, retrieval_k, query_enhancer=None, messages_history=None)
+  ├─► print ">> Processing..."
+
+  ├─► [optional] query_enhancer.enhance(question, messages_history)
   │     └─► enhancer llm: translate + rephrase question to docs_lang
-  │
+  │           With history: resolves pronouns/ellipsis using conversation context
+  │           Without history: standalone translation only
+
+  ├─► print ">> Retrieving..."
   ├─► store.query(rewritten_question, k)
   │     ├─ embed_engine.get_embedding(rewritten_question)  →  vector
   │     └─ collection.query(query_embeddings, n_results=k)
   │           Chroma cosine similarity search
   │           returns top-k document chunks
-  │
+
+  ├─► print ">> Retrieved N chunks. Generating..."
+
   └─► llm.generate_stream(messages)
         POST {base_url}/chat/completions (stream=True)
-        messages: [system prompt, {user: "Context:\n{chunks}\n\nQuestion: {rewritten_question}"}]
+        messages: [system prompt, (conversation history ...), {user:
+          "Context:\n{chunks}\n\nQuestion: {question}"}]
+
+The enhanced question is used **only for retrieval**.
+The LLM always receives the **original question** to preserve the user's language.
 ```
 
 If no relevant chunks are found, the system prints a message and skips the round.
@@ -180,12 +192,15 @@ LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
 
 ```text
 QueryEnhancer(llm_api, docs_lang="en")
-  .enhance(question) -> str
+  .enhance(question, history=None) -> str
 ```
 
-- Calls enhancer LLM to translate and rephrase the user question into `docs_lang`.
-- Replaces technical terms with their `docs_lang` equivalents.
-- Returns the rewritten question as a single string.
+Two modes:
+
+- **With conversation history**: Rewrites the question as a standalone query by resolving pronouns and ellipsis using the conversation context, then translates to `docs_lang`. Used in interactive mode (`cmd_chat`) for follow-up questions like "what does that mean".
+- **Without history** (single question in `cmd_ask`): Translates and rephrases the question into `docs_lang`, replacing technical terms with their equivalents.
+
+Returns the rewritten question as a single string. Used **only for retrieval** — the original question is sent to the answer LLM to preserve the user's language.
 
 ## Output Export
 
