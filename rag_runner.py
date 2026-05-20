@@ -18,13 +18,15 @@ def _import_lib():
 
 _SYSTEM_BASE_STRICT = (
     "You are a helpful assistant. Answer the user's question based ONLY on the provided context. "
-    "If the answer is not in the context, say 'I don't know'."
+    "If the answer is not in the context, say 'I don't know'. "
+    "Always respond in the same language as the user's question."
 )
 
 _SYSTEM_BASE = (
     "You are a helpful assistant. Use the provided context to enrich your answer, "
     "but also draw on your own knowledge when the context is insufficient. "
-    "If the context is provided, prefer it over your own knowledge for factual claims."
+    "If the context is provided, prefer it over your own knowledge for factual claims. "
+    "Always respond in the same language as the user's question."
 )
 
 _PROJECT_DIR = os.path.dirname(__file__)
@@ -143,7 +145,10 @@ def _retrieve_context(
 
 
 def _init_ask_chat(config: dict):
+    print(">> Importing modules... ", end="", flush=True)
+    t_imp = time.perf_counter()
     EmbedEngine, LlmApi, VectorDb = _import_lib()
+    print(f"\r\033[K>> Importing modules... done  [{time.perf_counter() - t_imp:.1f}s]")
 
     t0 = time.perf_counter()
     print(">> Loading embedding model... ", end="", flush=True)
@@ -175,6 +180,8 @@ def _init_ask_chat(config: dict):
     if config.get("query_enhance_enabled", False):
         from lib.query_enhancer import QueryEnhancer
 
+        t0 = time.perf_counter()
+        print(">> Initializing query enhancer... ", end="", flush=True)
         enhancer_llm = LlmApi(
             api_key=config["enhancer"]["api_key"],
             base_url=config["enhancer"]["api_base_url"],
@@ -184,6 +191,10 @@ def _init_ask_chat(config: dict):
         )
         query_enhancer = QueryEnhancer(
             enhancer_llm, docs_lang=config.get("docs_lang", "en")
+        )
+        print(
+            f"\r\033[K>> Initializing query enhancer... done  "
+            f"[{time.perf_counter() - t0:.1f}s]"
         )
 
     system_prompt = _build_system_prompt(
@@ -219,7 +230,11 @@ def cmd_ask(config: dict, question: str) -> None:
 
 
 def cmd_build(config: dict) -> None:
+    print(">> Importing modules... ", end="", flush=True)
+    t_imp = time.perf_counter()
     EmbedEngine, _, VectorDb = _import_lib()
+    print(f"\r\033[K>> Importing modules... done  [{time.perf_counter() - t_imp:.1f}s]")
+
     t0 = time.perf_counter()
 
     docs_dir = _resolve_path(config, "docs_dir")
@@ -315,7 +330,9 @@ def cmd_chat(config: dict) -> None:
 
 
 def main() -> None:
+    print(">> Loading config... ", end="", flush=True)
     config = load_config()
+    print("\r\033[K>> Loading config... done")
 
     if len(sys.argv) > 1:
         if sys.argv[1] == "--build":
