@@ -143,8 +143,21 @@ lib/
 
 - Python 3.10+
 - Dependencies: `sentence-transformers`, `chromadb`, `openai`, `pathspec`
-- GPU (optional): If CUDA-enabled PyTorch is installed, embedding will use GPU automatically. Verify with `python -c "import torch; print(torch.cuda.is_available())"`.
+- NVIDIA GPU (optional): Accelerates embedding. Requires NVIDIA driver + CUDA-enabled PyTorch.
+
+### GPU Setup
+
+1. Check if you have an NVIDIA GPU and driver: `nvidia-smi`
+2. Install CUDA-enabled PyTorch (default `pip install torch` is CPU-only):
+
+   ```bash
+   pip install torch --index-url https://download.pytorch.org/whl/cu121
+   ```
+
+3. Verify: `python -c "import torch; print(torch.cuda.is_available())"` -- should print `True`
+
+Without GPU, everything still works, just slower.
 
 ---
 
-See `ARCHITECTURE.md` for build/query workflow, module internals, and environment setup (GPU, `sentence-transformers` version).
+See `ARCHITECTURE.md` for build/query workflow, module internals, and environment setup (`sentence-transformers` version).
