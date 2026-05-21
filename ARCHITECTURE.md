@@ -181,7 +181,8 @@ VectorDb(persist_dir, embed_engine)
 
 ```text
 LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
-  .generate(messages) -> str
+  .generate(messages) -> str          # non-streaming (used by query_enhancer)
+  .generate_stream(messages) -> iter  # streaming (used by rag_runner)
 ```
 
 - Wraps `openai.OpenAI`.

@@ -14,12 +14,14 @@ cp config_example.json config.json
 
 # 2. Put your .txt / .md files in documents/
 
-# 3. Build the vector index
+# 3. Build the vector index (downloads ~641MB embedding model on first run)
 python rag_runner.py --build
 
 # 4. Ask a question (interactive mode)
 python rag_runner.py
 ```
+
+> **Note**: The code uses `hf-mirror.com` as the default HuggingFace endpoint. Do not override `HF_ENDPOINT` with `huggingface.co` -- it will cause connection timeouts.
 
 ## Usage
 
@@ -141,5 +143,8 @@ lib/
 
 - Python 3.10+
 - Dependencies: `sentence-transformers`, `chromadb`, `openai`, `pathspec`
+- GPU (optional): If CUDA-enabled PyTorch is installed, embedding will use GPU automatically. Verify with `python -c "import torch; print(torch.cuda.is_available())"`.
 
-See `ARCHITECTURE.md` for details on GPU acceleration, HuggingFace mirror setup, and design decisions.
+---
+
+See `ARCHITECTURE.md` for build/query workflow, module internals, and environment setup (GPU, `sentence-transformers` version).
