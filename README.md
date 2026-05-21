@@ -25,13 +25,17 @@ python rag_runner.py
 
 ## Usage
 
-**Build index** (run once, or after documents change):
+### Build Index
+
+Run once, or after documents change.
 
 ```bash
 python rag_runner.py --build
 ```
 
-**Interactive mode** (multi-turn conversation with history):
+### Interactive Mode
+
+Multi-turn conversation with history.
 
 ```bash
 python rag_runner.py
@@ -47,7 +51,9 @@ The system understands "types" refers to exponential smoothing types from our pr
 >>> /exit
 ```
 
-**Single-question mode** (one-shot, saves result to `output/`):
+### Single-Question Mode
+
+One-shot, saves result to `output/`.
 
 ```bash
 python rag_runner.py "What is exponential smoothing?"
@@ -141,11 +147,12 @@ lib/
 
 ## Requirements
 
-- Python 3.10+
-- Dependencies: `sentence-transformers`, `chromadb`, `openai`, `pathspec`
-- NVIDIA GPU (optional): Accelerates embedding. Requires NVIDIA driver + CUDA-enabled PyTorch.
+### Dependencies
 
-### GPU Setup
+- Python 3.10+
+- `sentence-transformers`, `chromadb`, `openai`, `pathspec`
+
+### GPU Setup (Optional)
 
 1. Check if you have an NVIDIA GPU and driver: `nvidia-smi`
 2. Install CUDA-enabled PyTorch (default `pip install torch` is CPU-only):
@@ -156,7 +163,7 @@ lib/
 
 3. Verify: `python -c "import torch; print(torch.cuda.is_available())"` -- should print `True`
 
-Without GPU, everything still works, just slower.
+Without GPU, everything still works, but **much slower**.
 
 ---
 
