@@ -3,7 +3,9 @@ import os
 import re
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime
+from typing import NamedTuple
 
 from lib.doc_loader import load_documents
 
@@ -14,6 +16,27 @@ def _import_lib():
     from lib.vector_db import VectorDb
 
     return EmbedEngine, LlmApi, VectorDb
+
+
+@contextmanager
+def _timed(label: str):
+    t0 = time.perf_counter()
+    print(f">> {label}... ", end="", flush=True)
+    yield
+    print(f"\r\033[K>> {label}... done  [{time.perf_counter() - t0:.1f}s]")
+
+
+def _init_embed_store(config: dict):
+    with _timed("Importing modules"):
+        EmbedEngine, LlmApi, VectorDb = _import_lib()
+    with _timed("Loading embedding model"):
+        embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
+    with _timed("Loading vector index"):
+        store = VectorDb(
+            persist_dir=_resolve_path(config, "chroma_persist_dir"),
+            embed_engine=embed_engine,
+        )
+    return store, LlmApi
 
 
 _SYSTEM_BASE_STRICT = (
@@ -89,22 +112,25 @@ def _export_round(
     safe_chunks = [_sanitize_chunk(c) for c in chunks]
     context_blocks = "\n\n".join(f"```text\n{c}\n```" for c in safe_chunks)
 
-    text = f"========== *Round {index}* ==========\n\n"
-    text += "**Question:**\n\n```text\n"
-    text += f"{question}\n"
-    text += "```\n\n"
+    parts = [
+        f"========== *Round {index}* ==========\n\n",
+        f"**Question:**\n\n```text\n{question}\n```\n\n",
+    ]
     if rewritten_question and rewritten_question != question:
-        text += f"**{enhance_label}:**\n\n```text\n"
-        text += f"{rewritten_question}\n"
-        text += "```\n\n"
-    text += f"**Answer:**\n\n{answer}\n\n"
-    text += "========== *Retrieved Context* =========="
-    text += "\n\n"
-    text += f"{context_blocks}\n"
+        parts.append(f"**{enhance_label}:**\n\n```text\n{rewritten_question}\n```\n\n")
+    parts.append(f"**Answer:**\n\n{answer}\n\n")
+    parts.append(f"========== *Retrieved Context* ==========\n\n{context_blocks}\n")
 
     filepath = os.path.join(out_dir, f"{index:02d}_round.md")
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write(text)
+        f.write("".join(parts))
+
+
+class RetrieveResult(NamedTuple):
+    chunks: list[str]
+    messages: list[dict] | None
+    rewritten_question: str
+    enhance_label: str
 
 
 def _retrieve_context(
@@ -115,7 +141,7 @@ def _retrieve_context(
     retrieval_k,
     query_enhancer=None,
     messages_history=None,
-):
+) -> RetrieveResult:
     rewritten_question = question
     enhance_label = "Enhanced Question"
 
@@ -129,7 +155,7 @@ def _retrieve_context(
     chunks = store.query(rewritten_question, k=retrieval_k)
     if not chunks:
         print("\r\033[K>> No relevant chunks found. Skipping.\n")
-        return [], None, rewritten_question, enhance_label
+        return RetrieveResult([], None, rewritten_question, enhance_label)
 
     print(f"\r\033[K>> Retrieved {len(chunks)} chunks. Generating...")
 
@@ -144,87 +170,90 @@ def _retrieve_context(
         },
     )
 
-    return chunks, messages, rewritten_question, enhance_label
+    return RetrieveResult(chunks, messages, rewritten_question, enhance_label)
 
 
 def _init_ask_chat(config: dict):
-    print(">> Importing modules... ", end="", flush=True)
-    t_imp = time.perf_counter()
-    EmbedEngine, LlmApi, VectorDb = _import_lib()
-    print(f"\r\033[K>> Importing modules... done  [{time.perf_counter() - t_imp:.1f}s]")
+    store, LlmApi = _init_embed_store(config)
 
-    t0 = time.perf_counter()
-    print(">> Loading embedding model... ", end="", flush=True)
-    embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
-    print(
-        f"\r\033[K>> Loading embedding model... done  [{time.perf_counter() - t0:.1f}s]"
-    )
-
-    t0 = time.perf_counter()
-    print(">> Loading vector index... ", end="", flush=True)
-    store = VectorDb(
-        persist_dir=_resolve_path(config, "chroma_persist_dir"),
-        embed_engine=embed_engine,
-    )
-    print(f"\r\033[K>> Loading vector index... done  [{time.perf_counter() - t0:.1f}s]")
-
-    t0 = time.perf_counter()
-    print(">> Initializing LLM... ", end="", flush=True)
-    llm = LlmApi(
-        api_key=config["llm"]["api_key"],
-        base_url=config["llm"]["api_base_url"],
-        model=config["llm"]["model"],
-        temperature=config["llm"].get("temperature", 0.3),
-        thinking_mode=config["llm"].get("thinking_mode", False),
-    )
-    print(f"\r\033[K>> Initializing LLM... done  [{time.perf_counter() - t0:.1f}s]")
+    with _timed("Initializing LLM"):
+        llm = LlmApi(
+            api_key=config["llm"]["api_key"],
+            base_url=config["llm"]["api_base_url"],
+            model=config["llm"]["model"],
+            temperature=config["llm"].get("temperature", 0.3),
+            thinking_mode=config["llm"].get("thinking_mode", False),
+        )
 
     query_enhancer = None
     if config.get("query_enhance_enabled", False):
         from lib.query_enhancer import QueryEnhancer
 
-        t0 = time.perf_counter()
-        print(">> Initializing query enhancer... ", end="", flush=True)
-
         enhancer_cfg = config["enhancer"]
         mode = enhancer_cfg.get("mode")
         docs_lang = config.get("docs_lang", "en")
 
-        if mode == "local":
-            from lib.local_translator import LocalTranslator
+        with _timed("Initializing query enhancer"):
+            if mode == "local":
+                from lib.local_translator import LocalTranslator
 
-            local_cfg = enhancer_cfg["local"]
-            translator = LocalTranslator(
-                query_lang=local_cfg["query_lang"],
-                docs_lang=docs_lang,
-                model_name=local_cfg.get("model_name"),
-            )
-            query_enhancer = QueryEnhancer(translator=translator, docs_lang=docs_lang)
-        elif mode == "llm":
-            llm_cfg = enhancer_cfg["llm"]
-            enhancer_llm = LlmApi(
-                api_key=llm_cfg["api_key"],
-                base_url=llm_cfg["api_base_url"],
-                model=llm_cfg["model"],
-                temperature=llm_cfg.get("temperature", 0.0),
-                thinking_mode=llm_cfg.get("thinking_mode", False),
-            )
-            query_enhancer = QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
-        else:
-            raise ValueError(
-                f"Invalid enhancer mode: '{mode}'. Must be 'local' or 'llm'."
-            )
-
-        print(
-            f"\r\033[K>> Initializing query enhancer... done  "
-            f"[{time.perf_counter() - t0:.1f}s]"
-        )
+                local_cfg = enhancer_cfg["local"]
+                translator = LocalTranslator(
+                    query_lang=local_cfg["query_lang"],
+                    docs_lang=docs_lang,
+                    model_name=local_cfg.get("model_name"),
+                )
+                query_enhancer = QueryEnhancer(
+                    translator=translator, docs_lang=docs_lang
+                )
+            elif mode == "llm":
+                llm_cfg = enhancer_cfg["llm"]
+                enhancer_llm = LlmApi(
+                    api_key=llm_cfg["api_key"],
+                    base_url=llm_cfg["api_base_url"],
+                    model=llm_cfg["model"],
+                    temperature=llm_cfg.get("temperature", 0.0),
+                    thinking_mode=llm_cfg.get("thinking_mode", False),
+                )
+                query_enhancer = QueryEnhancer(
+                    llm_api=enhancer_llm, docs_lang=docs_lang
+                )
+            else:
+                raise ValueError(
+                    f"Invalid enhancer mode: '{mode}'. Must be 'local' or 'llm'."
+                )
 
     system_prompt = _build_system_prompt(
         config.get("system_rules", ""), config.get("strict_context", False)
     )
 
     return store, llm, query_enhancer, system_prompt
+
+
+def cmd_search(config: dict, question: str) -> None:
+    """Search only: retrieve document chunks without LLM generation."""
+    store, _ = _init_embed_store(config)
+
+    k = config.get("retrieval_k", 3)
+    chunks = store.query(question, k=k)
+
+    if not chunks:
+        print(">> No relevant chunks found.")
+        return
+
+    enc = sys.stdout.encoding or "utf-8"
+    for i, chunk in enumerate(chunks, 1):
+        print(f"\n--- Chunk {i} ---")
+        print(chunk.encode(enc, errors="replace").decode(enc))
+
+
+def _stream_answer(llm, messages: list[dict]) -> str:
+    answer = ""
+    for token in llm.generate_stream(messages):
+        print(token, end="", flush=True)
+        answer += token
+    print()
+    return answer
 
 
 def cmd_ask(config: dict, question: str) -> None:
@@ -241,11 +270,7 @@ def cmd_ask(config: dict, question: str) -> None:
     if not chunks:
         return
 
-    answer = ""
-    for token in llm.generate_stream(messages):
-        print(token, end="", flush=True)
-        answer += token
-    print()
+    answer = _stream_answer(llm, messages)
 
     out_dir = _init_output_dir(question)
     _export_round(
@@ -275,52 +300,31 @@ def cmd_build(config: dict, force: bool = False) -> None:
         print(f">> Error: documents directory not found: {docs_dir}")
         sys.exit(1)
 
-    print(">> Loading and chunking documents... ", end="", flush=True)
-    t1 = time.perf_counter()
-    chunks, file_hashes = load_documents(
-        docs_dir,
-        chunk_size=config["chunk_size"],
-        chunk_overlap=config["chunk_overlap"],
-    )
+    with _timed("Loading and chunking documents"):
+        chunks, file_hashes = load_documents(
+            docs_dir,
+            chunk_size=config["chunk_size"],
+            chunk_overlap=config["chunk_overlap"],
+        )
     if not chunks:
-        print("\r\033[K>> No .txt or .md files found in documents directory.")
+        print(">> No .txt or .md files found in documents directory.")
         sys.exit(1)
-    print(
-        f"\r\033[K>> Loading and chunking documents... "
-        f"{len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
-        f"  [{time.perf_counter() - t1:.1f}s]"
-    )
+    print(f">> {len(chunks)} chunks from {len({c['source'] for c in chunks})} files")
 
     if not force and not _has_file_changes(persist_dir, file_hashes):
         print(">> No changes detected. Skipping.")
-        print(f"\r\033[K>> Build complete  [{time.perf_counter() - t0:.1f}s total]")
+        print(f">> Build complete  [{time.perf_counter() - t0:.1f}s total]")
         return
 
-    print(">> Importing modules... ", end="", flush=True)
-    t_imp = time.perf_counter()
-    EmbedEngine, _, VectorDb = _import_lib()
-    print(f"\r\033[K>> Importing modules... done  [{time.perf_counter() - t_imp:.1f}s]")
+    store, _ = _init_embed_store(config)
 
-    print(">> Loading embedding model... ", end="", flush=True)
-    t2 = time.perf_counter()
-    embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
-    print(
-        f"\r\033[K>> Loading embedding model... done  [{time.perf_counter() - t2:.1f}s]"
-    )
+    with _timed("Building vector index"):
+        if force:
+            store.rebuild_full(chunks, file_hashes)
+        else:
+            store.rebuild(chunks, file_hashes)
 
-    store = VectorDb(persist_dir=persist_dir, embed_engine=embed_engine)
-
-    print(">> Building vector index... ", end="", flush=True)
-    t3 = time.perf_counter()
-    if force:
-        store.rebuild_full(chunks, file_hashes)
-    else:
-        store.rebuild(chunks, file_hashes)
-    print(
-        f"\r\033[K>> Building vector index... done  [{time.perf_counter() - t3:.1f}s]"
-    )
-
-    print(f"\r\033[K>> Build complete  [{time.perf_counter() - t0:.1f}s total]")
+    print(f">> Build complete  [{time.perf_counter() - t0:.1f}s total]")
 
 
 def cmd_chat(config: dict) -> None:
@@ -359,11 +363,7 @@ def cmd_chat(config: dict) -> None:
         if not chunks:
             continue
 
-        answer = ""
-        for token in llm.generate_stream(messages):
-            print(token, end="", flush=True)
-            answer += token
-        print()
+        answer = _stream_answer(llm, messages)
 
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
@@ -383,15 +383,16 @@ def cmd_chat(config: dict) -> None:
 
 
 def main() -> None:
-    print(">> Loading config... ", end="", flush=True)
-    config = load_config()
-    print("\r\033[K>> Loading config... done")
+    with _timed("Loading config"):
+        config = load_config()
 
     if len(sys.argv) > 1:
         if sys.argv[1] == "--build":
             cmd_build(config)
         elif sys.argv[1] == "--rebuild":
             cmd_build(config, force=True)
+        elif sys.argv[1] == "--search":
+            cmd_search(config, " ".join(sys.argv[2:]))
         else:
             cmd_ask(config, " ".join(sys.argv[1:]))
     else:

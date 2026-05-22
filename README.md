@@ -1,8 +1,8 @@
 # AI-RAG-embed
 
-Local RAG (Retrieval-Augmented Generation) knowledge base. Ingest your documents, then ask questions and get answers grounded in your content.
+## Overview
 
-Embedding runs locally. Answer generation uses a remote LLM API (OpenAI-compatible).
+Drop your .txt/.md files into `documents/`, embed them locally to build the index, then ask questions and get answers from a remote LLM based on your content.
 
 ## Quick Start
 
@@ -58,6 +58,16 @@ One-shot, saves result to `output/`.
 python rag_qa.py "What is exponential smoothing?"
 ```
 
+### Search-Only Mode
+
+Retrieve relevant document chunks without generating an answer.
+
+```bash
+python rag_qa.py --search "What is exponential smoothing?"
+```
+
+Returns the top `retrieval_k` chunks (default: 3) directly to stdout.
+
 ## Configuration
 
 Copy `config_example.json` to `config.json` and edit. Relative paths (`./`) are resolved against the project root.
@@ -87,7 +97,7 @@ Copy `config_example.json` to `config.json` and edit. Relative paths (`./`) are 
 
 ### Query Enhancement (`enhancer`)
 
-Translates your question into `docs_lang` before searching. In LLM mode, also replaces technical terms and rewrites follow-up questions using conversation history.
+Translates your question into `docs_lang` before searching. In LLM mode, replaces technical terms for the first question; rewrites follow-up questions using conversation history.
 
 | Key | Description |
 | --- | --- |
@@ -142,7 +152,7 @@ Each round file contains the question, answer, processed question (labeled "Enha
 ## Project Structure
 
 ```text
-rag_qa.py               # entry point (--build | --rebuild | question | interactive)
+rag_qa.py               # entry point (--build | --rebuild | --search | question | interactive)
 config.json             # your configuration (gitignored)
 config_example.json     # configuration template
 documents/              # put your .txt / .md files here
