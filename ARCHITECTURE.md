@@ -22,7 +22,7 @@ Local RAG system with two phases:
 ## Directory Structure
 
 ```text
-rag_runner.py           # single entry point
+rag_qa.py           # single entry point
 config.json             # runtime config (gitignored)
 config_example.json     # config template (committed)
 documents/              # raw .txt / .md files
@@ -40,7 +40,7 @@ lib/
 
 ## Configuration
 
-`rag_runner.py` reads `config.json` at startup. No lib module reads the config directly -- they receive only the parameters they need.
+`rag_qa.py` reads `config.json` at startup. No lib module reads the config directly -- they receive only the parameters they need.
 
 | Field | Group | Description |
 | --- | --- | --- |
@@ -73,12 +73,12 @@ If `system_rules` is set, it is appended after the base prompt.
 
 ## Entry Point
 
-`rag_runner.py` dispatches based on `sys.argv`:
+`rag_qa.py` dispatches based on `sys.argv`:
 
 ```text
-python rag_runner.py              →  cmd_chat()    (interactive)
-python rag_runner.py "question"   →  cmd_ask()     (single-shot)
-python rag_runner.py --build      →  cmd_build()   (build index)
+python rag_qa.py              →  cmd_chat()    (interactive)
+python rag_qa.py "question"   →  cmd_ask()     (single-shot)
+python rag_qa.py --build      →  cmd_build()   (build index)
 ```
 
 Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`; `cmd_build` calls it directly. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
@@ -184,7 +184,7 @@ VectorDb(persist_dir, embed_engine)
 ```text
 LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
   .generate(messages) -> str          # non-streaming (used by query_enhancer, LLM mode only)
-  .generate_stream(messages) -> iter  # streaming (used by rag_runner)
+  .generate_stream(messages) -> iter  # streaming (used by rag_qa)
 ```
 
 - Wraps `openai.OpenAI`.

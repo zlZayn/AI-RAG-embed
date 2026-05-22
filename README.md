@@ -15,10 +15,10 @@ cp config_example.json config.json
 # 2. Put your .txt / .md files in documents/
 
 # 3. Build the vector index (downloads ~641MB embedding model on first run)
-python rag_runner.py --build
+python rag_qa.py --build
 
 # 4. Ask a question (interactive mode)
-python rag_runner.py
+python rag_qa.py
 ```
 
 > **Note**: The code uses `hf-mirror.com` as the default HuggingFace endpoint. Do not override `HF_ENDPOINT` with `huggingface.co` -- it will cause connection timeouts.
@@ -30,7 +30,7 @@ python rag_runner.py
 Run once, or after documents change.
 
 ```bash
-python rag_runner.py --build
+python rag_qa.py --build
 ```
 
 ### Interactive Mode
@@ -38,7 +38,7 @@ python rag_runner.py --build
 Multi-turn conversation with history.
 
 ```bash
-python rag_runner.py
+python rag_qa.py
 ```
 
 ```text
@@ -56,7 +56,7 @@ The system understands "types" refers to exponential smoothing types from our pr
 One-shot, saves result to `output/`.
 
 ```bash
-python rag_runner.py "What is exponential smoothing?"
+python rag_qa.py "What is exponential smoothing?"
 ```
 
 ## Configuration
@@ -148,7 +148,7 @@ Each round file contains the question, answer, processed question (labeled "Enha
 ## Project Structure
 
 ```text
-rag_runner.py           # entry point (--build | question | interactive)
+rag_qa.py           # entry point (--build | question | interactive)
 config.json             # your configuration (gitignored)
 config_example.json     # configuration template
 documents/              # put your .txt / .md files here
