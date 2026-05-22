@@ -64,9 +64,12 @@ Retrieve relevant document chunks without generating an answer.
 
 ```bash
 python rag_qa.py --search "What is exponential smoothing?"
+
+# With query enhancement (translates/rephrases before searching)
+python rag_qa.py --search --enhance "什么是指数平滑？"
 ```
 
-Returns the top `retrieval_k` chunks (default: 3) directly to stdout.
+Returns the top `retrieval_k` chunks (default: 3) directly to stdout. With `--enhance`, the query is processed through the enhancer (translation + term replacement) before retrieval, same as `cmd_ask`. Useful when your question language differs from the document language.
 
 ## Configuration
 

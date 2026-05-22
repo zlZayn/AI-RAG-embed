@@ -67,14 +67,15 @@ Relative paths (`./`) are resolved against the project root.
 `rag_qa.py` dispatches based on `sys.argv`:
 
 ```text
-python rag_qa.py              →  cmd_chat()             (interactive)
-python rag_qa.py "question"   →  cmd_ask()              (single-shot)
-python rag_qa.py --search "q" →  cmd_search()           (retrieve chunks only, no LLM)
-python rag_qa.py --build      →  cmd_build()            (incremental build)
-python rag_qa.py --rebuild    →  cmd_build(force=True)  (full rebuild)
+python rag_qa.py                       →  cmd_chat()             (interactive)
+python rag_qa.py "question"            →  cmd_ask()              (single-shot)
+python rag_qa.py --search "q"          →  cmd_search()           (retrieve only, no enhancer)
+python rag_qa.py --search --enhance "q"→  cmd_search(use_enhancer=True)  (retrieve with enhancement)
+python rag_qa.py --build               →  cmd_build()            (incremental build)
+python rag_qa.py --rebuild             →  cmd_build(force=True)  (full rebuild)
 ```
 
-Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_embed_store()`. `cmd_search` and `cmd_build` call `_init_embed_store()` directly (skipping LLM init). `cmd_build` first checks for file changes using only stdlib `json`; `_import_lib()` is called only when changes are detected. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
+Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_embed_store()`. `cmd_search` and `cmd_build` call `_init_embed_store()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` first checks for file changes using only stdlib `json`; `_import_lib()` is called only when changes are detected. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
 
 Progress messages use the `_timed(label)` context manager for consistent `">> {label}... done  [Xs]"` formatting.
 
@@ -116,7 +117,19 @@ cmd_build()
 
 Both `cmd_ask` and `cmd_chat` share `_init_ask_chat()` for engine initialization and `_retrieve_context()` for retrieval.
 `cmd_chat` additionally maintains a `history` list across rounds, truncated to the last `max_history_rounds` rounds (default: 10), and passes it for context-aware enhancement and message construction.
-`cmd_search` uses only `_init_embed_store()` for retrieval without LLM generation.
+`cmd_search` uses only `_init_embed_store()` for retrieval without LLM generation. With `--enhance`, it additionally calls `_init_enhancer()` to initialize the query enhancer and rewrites the question before retrieval — same enhancement logic as `cmd_ask`, but without LLM answer generation.
+
+`cmd_search` with `--enhance` follows a simplified path compared to `_retrieve_context`:
+
+```text
+cmd_search(question, use_enhancer=True)
+├─► _init_embed_store(config)          →  store
+├─► _init_enhancer(config)             →  enhancer
+├─► enhancer.enhance(question)         →  rewritten_question
+│   (same logic as _retrieve_context: LLM translation+term replacement, or local MarianMT)
+├─► store.query(rewritten_question, k, distance_threshold)
+└─► print chunks to stdout
+```
 
 ```text
 _retrieve_context(..., retrieval_distance_threshold=None) -> RetrieveResult(chunks, messages, rewritten_question, enhance_label)
@@ -151,6 +164,10 @@ The answer LLM always receives the **original question** to preserve the user's 
 ```
 
 If no relevant chunks are found, the system prints a message and skips the round.
+
+### _init_enhancer(config)
+
+Shared helper that initializes the query enhancer from config. Returns `None` if `query_enhance_enabled` is `false`. Used by both `cmd_search(use_enhancer=True)` and `_init_ask_chat()`. Avoids duplicating the enhancer initialization logic (local vs LLM mode selection, translator/LLM setup).
 
 ### Chunk Sanitization
 

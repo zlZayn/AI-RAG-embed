@@ -191,43 +191,7 @@ def _init_ask_chat(config: dict):
             thinking_mode=config["llm"].get("thinking_mode", False),
         )
 
-    query_enhancer = None
-    if config.get("query_enhance_enabled", False):
-        from lib.query_enhancer import QueryEnhancer
-
-        enhancer_cfg = config["enhancer"]
-        mode = enhancer_cfg.get("mode")
-        docs_lang = config.get("docs_lang", "en")
-
-        with _timed("Initializing query enhancer"):
-            if mode == "local":
-                from lib.local_translator import LocalTranslator
-
-                local_cfg = enhancer_cfg["local"]
-                translator = LocalTranslator(
-                    query_lang=local_cfg["query_lang"],
-                    docs_lang=docs_lang,
-                    model_name=local_cfg.get("model_name"),
-                )
-                query_enhancer = QueryEnhancer(
-                    translator=translator, docs_lang=docs_lang
-                )
-            elif mode == "llm":
-                llm_cfg = enhancer_cfg["llm"]
-                enhancer_llm = LlmApi(
-                    api_key=llm_cfg["api_key"],
-                    base_url=llm_cfg["api_base_url"],
-                    model=llm_cfg["model"],
-                    temperature=llm_cfg.get("temperature", 0.0),
-                    thinking_mode=llm_cfg.get("thinking_mode", False),
-                )
-                query_enhancer = QueryEnhancer(
-                    llm_api=enhancer_llm, docs_lang=docs_lang
-                )
-            else:
-                raise ValueError(
-                    f"Invalid enhancer mode: '{mode}'. Must be 'local' or 'llm'."
-                )
+    query_enhancer = _init_enhancer(config)
 
     system_prompt = _build_system_prompt(
         config.get("system_rules", ""), config.get("strict_context", False)
@@ -236,9 +200,54 @@ def _init_ask_chat(config: dict):
     return store, llm, query_enhancer, system_prompt
 
 
-def cmd_search(config: dict, question: str) -> None:
+def _init_enhancer(config: dict):
+    """Initialize query enhancer from config. Returns None if disabled."""
+    if not config.get("query_enhance_enabled", False):
+        return None
+
+    from lib.query_enhancer import QueryEnhancer
+    from lib.llm_api import LlmApi
+
+    enhancer_cfg = config["enhancer"]
+    mode = enhancer_cfg.get("mode")
+    docs_lang = config.get("docs_lang", "en")
+
+    with _timed("Initializing query enhancer"):
+        if mode == "local":
+            from lib.local_translator import LocalTranslator
+
+            local_cfg = enhancer_cfg["local"]
+            translator = LocalTranslator(
+                query_lang=local_cfg["query_lang"],
+                docs_lang=docs_lang,
+                model_name=local_cfg.get("model_name"),
+            )
+            return QueryEnhancer(translator=translator, docs_lang=docs_lang)
+        elif mode == "llm":
+            llm_cfg = enhancer_cfg["llm"]
+            enhancer_llm = LlmApi(
+                api_key=llm_cfg["api_key"],
+                base_url=llm_cfg["api_base_url"],
+                model=llm_cfg["model"],
+                temperature=llm_cfg.get("temperature", 0.0),
+                thinking_mode=llm_cfg.get("thinking_mode", False),
+            )
+            return QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
+        else:
+            raise ValueError(
+                f"Invalid enhancer mode: '{mode}'. Must be 'local' or 'llm'."
+            )
+
+
+def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
     """Search only: retrieve document chunks without LLM generation."""
     store, _ = _init_embed_store(config)
+
+    if use_enhancer:
+        enhancer = _init_enhancer(config)
+        if enhancer:
+            question = enhancer.enhance(question)
+            print(f">> Enhanced: {question}")
 
     k = config.get("retrieval_k", 3)
     distance_threshold = config.get("retrieval_distance_threshold")
@@ -401,7 +410,10 @@ def main() -> None:
         elif sys.argv[1] == "--rebuild":
             cmd_build(config, force=True)
         elif sys.argv[1] == "--search":
-            cmd_search(config, " ".join(sys.argv[2:]))
+            args = sys.argv[2:]
+            use_enhancer = "--enhance" in args
+            question = " ".join(a for a in args if a != "--enhance")
+            cmd_search(config, question, use_enhancer=use_enhancer)
         else:
             cmd_ask(config, " ".join(sys.argv[1:]))
     else:
