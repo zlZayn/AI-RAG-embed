@@ -27,10 +27,9 @@ python rag_qa.py
 
 ### Build Index
 
-Run once, or after documents change.
-
 ```bash
-python rag_qa.py --build
+python rag_qa.py --build    # incremental: skip if no files changed
+python rag_qa.py --rebuild  # force full re-embed
 ```
 
 ### Interactive Mode
@@ -61,67 +60,58 @@ python rag_qa.py "What is exponential smoothing?"
 
 ## Configuration
 
-Copy `config_example.json` to `config.json` and edit.
+Copy `config_example.json` to `config.json` and edit. Relative paths (`./`) are resolved against the project root.
 
-### Document & Retrieval Configuration
-
-| Key | Description |
-| --- | --- |
-| `docs_dir` | Folder containing your `.txt` / `.md` files. All files (including subfolders) are loaded when running `--build`. Supports `.doc_loader_ignore` for excluding files. |
-| `docs_lang` | Language of your documents. The enhancer translates your question into this language before searching. Use `"en"` for English, `"zh"` for Chinese, etc. |
-| `chunk_size` | Characters per chunk when building the index. Larger = more context per chunk, but less precise retrieval. Typical range: 300-1000. |
-| `chunk_overlap` | Overlapping characters between adjacent chunks. Prevents sentences at chunk boundaries from being split. Recommended: 10-20% of `chunk_size`. |
-| `embedding_model_name` | HuggingFace model ID for converting text into vector embeddings. |
-| `retrieval_k` | Number of chunks to retrieve per query. More chunks = more context, but longer prompts. Default: 3. |
-| `chroma_persist_dir` | Folder where the vector database is saved. Created automatically by `--build`. |
-| `query_enhance_enabled` | Enable query enhancement. Translates your question into `docs_lang` before searching. In LLM mode, also replaces technical terms and rewrites follow-up questions using conversation history. In local mode, translation only. |
-| `strict_context` | `false` = LLM may use its own knowledge to supplement the answer. `true` = LLM answers **only** from retrieved chunks. |
-| `system_rules` | Extra instructions added to the system prompt (e.g., "No emoji. Use $...$ for math formulas."). |
-
-### Enhancer Configuration (`enhancer`)
-
-The enhancer translates your question into the document language before searching. Two backends are available, selected by `mode`.
+### Document & Indexing
 
 | Key | Description |
 | --- | --- |
-| `mode` | `"llm"` = use an LLM API. `"local"` = use a local MarianMT model. |
+| `docs_dir` | Folder containing your `.txt` / `.md` files (including subfolders). Use `.doc_loader_ignore` to exclude files (`.gitignore` syntax). |
+| `docs_lang` | Language of your documents (e.g., `"en"`, `"zh"`). The enhancer translates your question into this language before searching. |
+| `chunk_size` | Target characters per chunk. Larger = more context, less precise retrieval. Typical range: 300-1000. |
+| `chunk_overlap` | Overlapping characters between adjacent chunks. Recommended: 10-20% of `chunk_size`. |
+| `embedding_model_name` | HuggingFace model ID for vector embeddings. |
+| `chroma_persist_dir` | Folder where the vector database is saved. |
 
-#### LLM Mode (`mode: "llm"`)
-
-Calls an OpenAI-compatible API. Can translate, replace technical terms, and rewrite follow-up questions using conversation history.
-
-| Key | Description |
-| --- | --- |
-| `api_base_url` | API endpoint URL (OpenAI-compatible). |
-| `api_key` | API key. Keep this secret. |
-| `model` | Model name (e.g., `"deepseek-v4-flash"`, `"gpt-3.5-turbo"`). |
-| `temperature` | Sampling temperature. Use `0.0` for deterministic results. |
-| `thinking_mode` | Enable thinking mode (if supported by your API). |
-
-#### Local Mode (`mode: "local"`)
-
-Runs a MarianMT translation model locally. Fast, offline, no API key needed. Only does translation — does not replace technical terms or rewrite follow-up questions.
+### Retrieval
 
 | Key | Description |
 | --- | --- |
-| `src_lang` | Language you ask questions in (e.g., `"zh"`, `"en"`). |
-| `model_name` | HuggingFace model ID (optional). If omitted, auto-selects `Helsinki-NLP/opus-mt-{src_lang}-{docs_lang}`. For example, if you ask in Chinese and your docs are in English, it loads `Helsinki-NLP/opus-mt-zh-en`. |
+| `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
 
-### Answer Generation Model Configuration (`llm`)
+### Query Enhancement (`enhancer`)
 
-The LLM that generates the final answer using the retrieved chunks.
+Translates your question into `docs_lang` before searching. In LLM mode, also replaces technical terms and rewrites follow-up questions using conversation history.
 
 | Key | Description |
 | --- | --- |
-| `api_base_url` | API endpoint URL (OpenAI-compatible). |
-| `api_key` | API key. Keep this secret. |
-| `model` | Model name (e.g., `"deepseek-v4-flash"`, `"gpt-4"`). |
-| `temperature` | Lower = more focused, higher = more creative. Range: 0.0-2.0. |
-| `thinking_mode` | Enable thinking mode (if supported by your API). |
+| `query_enhance_enabled` | Enable query enhancement. Default: `false`. |
+| `mode` | `"llm"` = use an LLM API. `"local"` = use a local MarianMT model (offline, translation only). |
+
+**LLM mode** (`enhancer.llm`): `api_base_url`, `api_key`, `model`, `temperature` (Default: `0.0`), `thinking_mode`.
+
+**Local mode** (`enhancer.local`):
+
+| Key | Description |
+| --- | --- |
+| `query_lang` | Language you ask questions in (e.g., `"zh"`, `"en"`). |
+| `model_name` | HuggingFace model ID (optional). Auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` if omitted. |
+
+### Answer Generation (`llm`)
+
+The LLM that generates the final answer using the retrieved chunks. Fields: `api_base_url`, `api_key`, `model`, `temperature` (Default: `0.3`), `thinking_mode`.
+
+### Chat Behavior
+
+| Key | Description |
+| --- | --- |
+| `max_history_rounds` | Recent conversation rounds to keep for context. Default: `10`. |
+| `strict_context` | `true` = answer **only** from retrieved chunks. `false` = LLM may supplement with its own knowledge. Default: `false`. |
+| `system_rules` | Extra instructions appended to the system prompt. Default: `""`. |
 
 ## Document Filtering
 
-Place a `.doc_loader_ignore` file in any subdirectory under `documents/`. Uses `.gitignore` syntax.
+Place a `.doc_loader_ignore` file in any subdirectory under `documents/`. Uses `.gitignore` syntax. Patterns apply to the containing directory and all subdirectories.
 
 ```text
 # documents/fpp3_textbook/.doc_loader_ignore
@@ -129,8 +119,6 @@ README.md
 *.log
 _draft/
 ```
-
-Patterns apply to the directory containing the ignore file and all its subdirectories.
 
 ## Output
 
@@ -148,7 +136,7 @@ Each round file contains the question, answer, processed question (labeled "Enha
 ## Project Structure
 
 ```text
-rag_qa.py           # entry point (--build | question | interactive)
+rag_qa.py               # entry point (--build | --rebuild | question | interactive)
 config.json             # your configuration (gitignored)
 config_example.json     # configuration template
 documents/              # put your .txt / .md files here

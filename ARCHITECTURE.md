@@ -6,10 +6,11 @@ Local RAG system with two phases:
 
 ### Build Phase (`--build`)
 
-1. Load all `.txt` and `.md` files from `documents/` directory
-2. Split files into text chunks with sliding window overlap
-3. Convert chunks to vector embeddings using a local embedding model
-4. Store embeddings and original text in a Chroma vector database
+1. Load all `.txt` and `.md` files from `documents/` directory, computing MD5 hashes for change detection
+2. Split files into text chunks at natural boundaries (paragraph > sentence > word)
+3. Check for file changes against stored hashes; skip if none (only with `--build`)
+4. Convert chunks to vector embeddings using a local embedding model
+5. Store embeddings and original text in a Chroma vector database
 
 ### Query Phase
 
@@ -30,9 +31,9 @@ chroma_db/              # persisted Chroma DB (generated, gitignored)
 output/                 # conversation logs (generated, gitignored)
 lib/
 ├── __init__.py
-├── doc_loader.py       # os.walk + sliding window chunking + ignore patterns
+├── doc_loader.py       # os.walk + smart boundary chunking + ignore patterns + file hashing
 ├── embed_engine.py     # SentenceTransformer wrapper
-├── vector_db.py       # Chroma PersistentClient operations
+├── vector_db.py       # Chroma PersistentClient + incremental rebuild via file hash diff
 ├── llm_api.py         # openai.OpenAI wrapper
 ├── query_enhancer.py  # query enhancement (translation + rewording)
 └── local_translator.py # MarianMT local translation backend
@@ -44,18 +45,19 @@ lib/
 
 | Field | Group | Description |
 | --- | --- | --- |
-| `docs_dir` | Local data | Source document directory |
-| `docs_lang` | Local data | Target language for question translation |
-| `chunk_size` | Local data | Characters per chunk (sliding window) |
-| `chunk_overlap` | Local data | Overlapping characters between adjacent chunks |
-| `embedding_model_name` | Embedding | HuggingFace model ID |
-| `chroma_persist_dir` | Embedding | Chroma persistence directory |
-| `retrieval_k` | Embedding | Number of chunks to retrieve (default: 3) |
-| `query_enhance_enabled` | Enhancement | Enable query enhancement |
+| `docs_dir` | Indexing | Source document directory |
+| `docs_lang` | Indexing | Target language for question translation |
+| `chunk_size` | Indexing | Target characters per chunk (splits at natural boundaries) |
+| `chunk_overlap` | Indexing | Overlapping characters between adjacent chunks |
+| `embedding_model_name` | Indexing | HuggingFace model ID |
+| `chroma_persist_dir` | Indexing | Chroma persistence directory |
+| `retrieval_k` | Retrieval | Number of chunks to retrieve (Default: `3`) |
+| `query_enhance_enabled` | Enhancement | Enable query enhancement (Default: `false`) |
 | `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (API) or `"local"` (MarianMT) |
-| `llm` | LLM | LLM model config (api_base_url, api_key, model, temperature, thinking_mode) |
-| `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge |
-| `system_rules` | Behavior | Additional system prompt rules (optional) |
+| `llm` | Generation | LLM model config (api_base_url, api_key, model, temperature (Default: `0.3`), thinking_mode) |
+| `max_history_rounds` | Behavior | Recent conversation rounds to keep (Default: `10`) |
+| `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (Default: `false`) |
+| `system_rules` | Behavior | Additional system prompt rules (Default: `""`) |
 
 Relative paths (`./`) are resolved against the project root.
 
@@ -76,12 +78,13 @@ If `system_rules` is set, it is appended after the base prompt.
 `rag_qa.py` dispatches based on `sys.argv`:
 
 ```text
-python rag_qa.py              →  cmd_chat()    (interactive)
-python rag_qa.py "question"   →  cmd_ask()     (single-shot)
-python rag_qa.py --build      →  cmd_build()   (build index)
+python rag_qa.py              →  cmd_chat()             (interactive)
+python rag_qa.py "question"   →  cmd_ask()              (single-shot)
+python rag_qa.py --build      →  cmd_build()            (incremental build)
+python rag_qa.py --rebuild    →  cmd_build(force=True)  (full rebuild)
 ```
 
-Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`; `cmd_build` calls it directly. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
+Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`. `cmd_build` first checks for file changes using only stdlib `json`; `_import_lib()` is called only when changes are detected. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
 
 ## Build Workflow
 
@@ -90,25 +93,35 @@ cmd_build()
   ├─► doc_loader.load_documents(docs_dir, chunk_size, chunk_overlap)
   │     ├─ pre-scan: walk tree, collect .doc_loader_ignore specs
   │     ├─ os.walk: collect .txt/.md files, skip ignored
-  │     ├─ read UTF-8 content
-  │     └─ sliding window: [start, start+chunk_size), step = chunk_size - overlap
-  │         returns [{"text": str, "source": "relative/path"}, ...]
+  │     ├─ read UTF-8 content, compute MD5 hash per file
+  │     └─ smart split: paragraph > sentence > word > hard cut
+  │         returns (chunks, file_hashes)
+  │         chunks: [{"text": str, "source": "relative/path"}, ...]
+  │         file_hashes: {"relative/path": "md5hex", ...}
   │
-  ├─► embed_engine.EmbedEngine(model_name)
-  │     └─ SentenceTransformer(model_name)
+  ├─► _has_file_changes(persist_dir, file_hashes)
+  │     ├─ read build_meta.json directly (json.load, no heavy imports)
+  │     ├─ compare keys + hash values
+  │     └─ if no changes → print "No changes detected", return early
   │
-  └─► vector_db.VectorDb(persist_dir, embed_engine).rebuild(chunks)
-        ├─ embed_batch(texts)  →  list[list[float]]
-        ├─ delete all existing entries
-        └─ add(ids, embeddings, documents, metadatas)
+  └─► [only if changes detected]
+        ├─► _import_lib()  →  EmbedEngine, LlmApi, VectorDb
+        ├─► embed_engine.EmbedEngine(model_name)
+        │     └─ SentenceTransformer(model_name)
+        │
+        └─► vector_db.VectorDb(persist_dir, embed_engine)
+              ├─ --build:   .rebuild(chunks, file_hashes)       # incremental
+              └─ --rebuild: .rebuild_full(chunks, file_hashes)   # delete all, re-embed
 ```
 
-`rebuild()` does a full delete-then-add cycle, ensuring removed documents leave no orphaned chunks.
+`--rebuild` skips change detection and forces a full delete-then-add cycle. `--build` reads `build_meta.json` via stdlib `json` only — no `sentence-transformers`, `chromadb`, or `openai` imported when no files changed.
+
+`rebuild()` performs incremental updates by comparing file content hashes stored in `build_meta.json`. Only changed, added, or removed files are re-embedded. `rebuild_full()` does a full delete-then-add cycle for when a clean rebuild is needed.
 
 ## Query Workflow
 
 Both `cmd_ask` and `cmd_chat` share `_init_ask_chat()` for engine initialization and `_retrieve_context()` for retrieval.
-`cmd_chat` additionally maintains a `history` list across rounds and passes it for context-aware enhancement and message construction.
+`cmd_chat` additionally maintains a `history` list across rounds, truncated to the last `max_history_rounds` rounds (default: 10), and passes it for context-aware enhancement and message construction.
 
 ```text
 _retrieve_context(store, llm, question, system_prompt, retrieval_k, query_enhancer=None, messages_history=None)
@@ -145,14 +158,16 @@ If no relevant chunks are found, the system prints a message and skips the round
 ### lib/doc_loader.py
 
 ```text
-load_documents(docs_dir, chunk_size, chunk_overlap) -> list[dict]
+load_documents(docs_dir, chunk_size, chunk_overlap) -> (list[dict], dict[str, str])
 ```
 
 - Walks directory tree with `os.walk`.
 - Pre-scans for `.doc_loader_ignore` files (`.gitignore` syntax via `pathspec`).
-- Sliding window chunking: window = `chunk_size`, step = `chunk_size - chunk_overlap`.
+- Smart chunk splitting: searches backward from `chunk_size` for the best natural boundary (paragraph > sentence > word > hard cut). Minimum boundary = `chunk_size // 2`.
 - Each chunk carries its source file path relative to `docs_dir`.
+- Computes MD5 hash per file for incremental rebuild detection.
 - Skips empty files.
+- Returns `(chunks, file_hashes)` tuple.
 
 ### lib/embed_engine.py
 
@@ -170,8 +185,9 @@ EmbedEngine(model_name)
 ### lib/vector_db.py
 
 ```text
-VectorDb(persist_dir, embed_engine)
-  .rebuild(chunks) -> None
+VectorDb(persist_dir, embed_engine=None)
+  .rebuild(chunks, file_hashes) -> None    # incremental: only re-embed changed files
+  .rebuild_full(chunks, file_hashes) -> None  # full delete-then-add
   .query(question, k) -> list[str]
 ```
 
@@ -215,13 +231,13 @@ Returns the result as a single string. Used **only for retrieval** — the answe
 ### lib/local_translator.py
 
 ```text
-LocalTranslator(src_lang, docs_lang, model_name=None)
+LocalTranslator(query_lang, docs_lang, model_name=None)
   .translate(text) -> str
 ```
 
 - Loads a Helsinki-NLP MarianMT model via `transformers.MarianMTModel` and `MarianTokenizer`.
 - Model loaded with `use_safetensors=True` to avoid `torch.load` security restriction (CVE-2025-32434) — works with any torch version.
-- `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{src_lang}-{docs_lang}` (e.g., `src_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`).
+- `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` (e.g., `query_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`).
 - Class-level cache (`_cache` dict): keyed by model name. Same language pair shares one loaded model across all instances within the process.
 - First load downloads from HuggingFace (approx. 300 MB). Subsequent loads read from the local HuggingFace cache (`~/.cache/huggingface/`).
 - `translate()`: tokenizes input, runs `model.generate()`, decodes output tokens. Returns the translated string.
@@ -319,6 +335,7 @@ The model is cached to `~/.cache/huggingface/` after first download.
 | `documents/` not found at build time | Print message, exit code 1 |
 | No `.txt`/`.md` files found | Print message, exit code 1 |
 | No relevant chunks for a question | Print message, skip round (does not crash) |
+| Invalid enhancer `mode` value | `ValueError` raised with valid options |
 | API network errors | Unhandled exception (stack trace visible) |
 | Embedding model download failure | `SentenceTransformer` raises, process exits |
 | Chroma persistence errors | Raised by `chromadb`, not caught (disk/permission issue) |

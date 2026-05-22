@@ -8,9 +8,9 @@ from transformers import MarianMTModel, MarianTokenizer
 class LocalTranslator:
     _cache: dict[str, tuple[MarianTokenizer, MarianMTModel]] = {}
 
-    def __init__(self, src_lang: str, docs_lang: str, model_name: str | None = None):
+    def __init__(self, query_lang: str, docs_lang: str, model_name: str | None = None):
         if model_name is None:
-            model_name = f"Helsinki-NLP/opus-mt-{src_lang}-{docs_lang}"
+            model_name = f"Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}"
         self._model_name = model_name
         self._tokenizer, self._model = self._load(model_name)
 

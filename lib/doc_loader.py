@@ -1,8 +1,19 @@
+import hashlib
 import os
 
 import pathspec
 
 _IGNORE_FILE = ".doc_loader_ignore"
+
+_BREAK_PRIORITY = ["\n\n", "\n", "。", "！", "？", ".", "!", "?", " "]
+
+
+def _find_break(text: str, end: int, min_end: int) -> int:
+    for sep in _BREAK_PRIORITY:
+        idx = text.rfind(sep, min_end, end)
+        if idx != -1:
+            return idx + len(sep)
+    return end
 
 
 def _collect_ignore_specs(docs_dir: str) -> list[tuple[str, pathspec.PathSpec]]:
@@ -30,6 +41,7 @@ def load_documents(
 ) -> list[dict]:
     ignore_specs = _collect_ignore_specs(docs_dir)
     chunks = []
+    file_hashes = {}
 
     for root, _, files in os.walk(docs_dir):
         for filename in files:
@@ -51,13 +63,21 @@ def load_documents(
             if not text.strip():
                 continue
 
+            file_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+            file_hashes[relative_path] = file_hash
+
             start = 0
             while start < len(text):
                 end = start + chunk_size
+                if end < len(text):
+                    min_end = start + chunk_size // 2
+                    end = _find_break(text, end, min_end)
+                else:
+                    end = len(text)
                 chunk_text = text[start:end]
                 chunks.append({"text": chunk_text, "source": relative_path})
                 if end >= len(text):
                     break
                 start = end - chunk_overlap
 
-    return chunks
+    return chunks, file_hashes

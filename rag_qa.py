@@ -195,7 +195,7 @@ def _init_ask_chat(config: dict):
 
             local_cfg = enhancer_cfg["local"]
             translator = LocalTranslator(
-                src_lang=local_cfg["src_lang"],
+                query_lang=local_cfg["query_lang"],
                 docs_lang=docs_lang,
                 model_name=local_cfg.get("model_name"),
             )
@@ -211,14 +211,9 @@ def _init_ask_chat(config: dict):
             )
             query_enhancer = QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
         else:
-            enhancer_llm = LlmApi(
-                api_key=enhancer_cfg["api_key"],
-                base_url=enhancer_cfg["api_base_url"],
-                model=enhancer_cfg["model"],
-                temperature=enhancer_cfg.get("temperature", 0.0),
-                thinking_mode=enhancer_cfg.get("thinking_mode", False),
+            raise ValueError(
+                f"Invalid enhancer mode: '{mode}'. Must be 'local' or 'llm'."
             )
-            query_enhancer = QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
 
         print(
             f"\r\033[K>> Initializing query enhancer... done  "
@@ -259,17 +254,22 @@ def cmd_ask(config: dict, question: str) -> None:
     print(f"\nSaved to {out_dir}")
 
 
-def cmd_build(config: dict) -> None:
-    print(">> Importing modules... ", end="", flush=True)
-    t_imp = time.perf_counter()
-    EmbedEngine, _, VectorDb = _import_lib()
-    print(f"\r\033[K>> Importing modules... done  [{time.perf_counter() - t_imp:.1f}s]")
+def _has_file_changes(persist_dir: str, file_hashes: dict[str, str]) -> bool:
+    meta_path = os.path.join(persist_dir, "build_meta.json")
+    if not os.path.exists(meta_path):
+        return True
+    with open(meta_path, "r", encoding="utf-8") as f:
+        old_meta = json.load(f)
+    if set(old_meta.keys()) != set(file_hashes.keys()):
+        return True
+    return any(old_meta[f] != file_hashes[f] for f in file_hashes)
 
+
+def cmd_build(config: dict, force: bool = False) -> None:
     t0 = time.perf_counter()
 
     docs_dir = _resolve_path(config, "docs_dir")
     persist_dir = _resolve_path(config, "chroma_persist_dir")
-    model_name = config["embedding_model_name"]
 
     if not os.path.isdir(docs_dir):
         print(f">> Error: documents directory not found: {docs_dir}")
@@ -277,7 +277,7 @@ def cmd_build(config: dict) -> None:
 
     print(">> Loading and chunking documents... ", end="", flush=True)
     t1 = time.perf_counter()
-    chunks = load_documents(
+    chunks, file_hashes = load_documents(
         docs_dir,
         chunk_size=config["chunk_size"],
         chunk_overlap=config["chunk_overlap"],
@@ -291,17 +291,31 @@ def cmd_build(config: dict) -> None:
         f"  [{time.perf_counter() - t1:.1f}s]"
     )
 
+    if not force and not _has_file_changes(persist_dir, file_hashes):
+        print(">> No changes detected. Skipping.")
+        print(f"\r\033[K>> Build complete  [{time.perf_counter() - t0:.1f}s total]")
+        return
+
+    print(">> Importing modules... ", end="", flush=True)
+    t_imp = time.perf_counter()
+    EmbedEngine, _, VectorDb = _import_lib()
+    print(f"\r\033[K>> Importing modules... done  [{time.perf_counter() - t_imp:.1f}s]")
+
     print(">> Loading embedding model... ", end="", flush=True)
     t2 = time.perf_counter()
-    embed_engine = EmbedEngine(model_name=model_name)
+    embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
     print(
         f"\r\033[K>> Loading embedding model... done  [{time.perf_counter() - t2:.1f}s]"
     )
 
+    store = VectorDb(persist_dir=persist_dir, embed_engine=embed_engine)
+
     print(">> Building vector index... ", end="", flush=True)
     t3 = time.perf_counter()
-    store = VectorDb(persist_dir=persist_dir, embed_engine=embed_engine)
-    store.rebuild(chunks)
+    if force:
+        store.rebuild_full(chunks, file_hashes)
+    else:
+        store.rebuild(chunks, file_hashes)
     print(
         f"\r\033[K>> Building vector index... done  [{time.perf_counter() - t3:.1f}s]"
     )
@@ -317,6 +331,7 @@ def cmd_chat(config: dict) -> None:
     out_dir = None
     round_index = 0
     history = []
+    max_rounds = config.get("max_history_rounds", 10)
 
     while True:
         try:
@@ -330,6 +345,8 @@ def cmd_chat(config: dict) -> None:
         if question in ("/exit", "/quit", "/q"):
             break
 
+        recent_history = history[-max_rounds * 2 :] if max_rounds else history
+
         chunks, messages, rewritten_question, enhance_label = _retrieve_context(
             store,
             llm,
@@ -337,7 +354,7 @@ def cmd_chat(config: dict) -> None:
             system_prompt,
             config.get("retrieval_k", 3),
             query_enhancer,
-            messages_history=history,
+            messages_history=recent_history,
         )
         if not chunks:
             continue
@@ -373,6 +390,8 @@ def main() -> None:
     if len(sys.argv) > 1:
         if sys.argv[1] == "--build":
             cmd_build(config)
+        elif sys.argv[1] == "--rebuild":
+            cmd_build(config, force=True)
         else:
             cmd_ask(config, " ".join(sys.argv[1:]))
     else:
