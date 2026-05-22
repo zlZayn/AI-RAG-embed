@@ -32,6 +32,8 @@ python rag_qa.py --build    # incremental: skip if no files changed
 python rag_qa.py --rebuild  # force full re-embed
 ```
 
+`--build` only detects file content changes. If you change `chunk_size`, `chunk_overlap`, or `embedding_model_name` in `config.json`, use `--rebuild` to re-embed everything.
+
 ### Interactive Mode
 
 Multi-turn conversation with history.
@@ -65,11 +67,31 @@ Retrieve relevant document chunks without generating an answer.
 ```bash
 python rag_qa.py --search "What is exponential smoothing?"
 
-# With query enhancement (translates/rephrases before searching)
+# With query enhancement (retrieval-optimized rewriting before searching)
 python rag_qa.py --search --enhance "什么是指数平滑？"
 ```
 
-Returns the top `retrieval_k` chunks (default: 3) directly to stdout. With `--enhance`, the query is processed through the enhancer (translation + term replacement) before retrieval, same as `cmd_ask`. Useful when your question language differs from the document language.
+Returns the top `retrieval_k` chunks (default: 3) directly to stdout. With `--enhance`, the query is processed through the enhancer before retrieval, same as `cmd_ask`. See [Query Enhancement](#query-enhancement-enhancer) for mode differences.
+
+### CLI Overrides
+
+Some config fields can be overridden via CLI arguments. If omitted, values fall back to `config.json`, then to code defaults.
+
+```bash
+python rag_qa.py --retrieval_k 10 --retrieval_distance_threshold 0.25 --strict_context true "your question"
+
+python rag_qa.py --search --enhance --retrieval_k 3 --retrieval_distance_threshold 0.15 "your question"
+```
+
+Supported: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`. Works with all modes (ask, chat, search).
+
+### Query Tips
+
+The enhancer rewrites queries for better vector similarity, but it cannot retrieve what the documents do not contain.
+
+- Stay within the knowledge base's domain and use terms that appear in the documents.
+- Provide enough context to disambiguate. "Prediction intervals are too narrow" is ambiguous; "ARIMA prediction intervals are too narrow" is not.
+- Local mode only translates, so how you phrase the question matters more than in LLM mode.
 
 ## Configuration
 
@@ -80,7 +102,7 @@ Edit `config.json` to configure the system. Relative paths (`./`) are resolved a
 | Key | Description |
 | --- | --- |
 | `docs_dir` | Folder containing your `.txt` / `.md` files (including subfolders). Use `.doc_loader_ignore` to exclude files (`.gitignore` syntax). |
-| `docs_lang` | Language of your documents (e.g., `"en"`, `"zh"`). The enhancer translates your question into this language before searching. |
+| `docs_lang` | Language of your documents (e.g., `"en"`, `"zh"`). The enhancer generates output in this language for retrieval. |
 | `chunk_size` | Target characters per chunk. Larger = more context, less precise retrieval. Typical range: 300-1000. |
 | `chunk_overlap` | Overlapping characters between adjacent chunks. Recommended: 10-20% of `chunk_size`. |
 | `embedding_model_name` | HuggingFace model ID for vector embeddings. See notes below. |
@@ -97,25 +119,33 @@ Edit `config.json` to configure the system. Relative paths (`./`) are resolved a
 | Key | Description |
 | --- | --- |
 | `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
-| `retrieval_distance_threshold` | Cosine distance threshold. Only returns chunks with distance below this value. Distance = 1 - similarity, range [0, 2]. Lower = more similar. Default: `0.3` (similarity > 0.7). Set `null` to disable filtering. |
+| `retrieval_distance_threshold` | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in the enhancer config when enhancement is enabled. Set `null` to disable filtering. Default: `0.3`. |
 
 ### Query Enhancement (`enhancer`)
 
-Translates your question into `docs_lang` before searching. In LLM mode, replaces technical terms for the first question; rewrites follow-up questions using conversation history.
+Rewrites your question before searching to improve retrieval quality. The enhanced output is used **only for retrieval** — the answer LLM always receives the original question.
 
 | Key | Description |
 | --- | --- |
 | `query_enhance_enabled` | Enable query enhancement. Default: `false`. |
-| `mode` | `"llm"` = use an LLM API. `"local"` = use a local MarianMT model (offline, translation only). |
+| `mode` | `"llm"` = use an LLM API to generate retrieval-optimized paragraphs. `"local"` = use a local MarianMT model (offline, translation only). |
 
-**LLM mode** (`enhancer.llm`): `api_base_url`, `api_key`, `model`, `temperature` (Default: `0.0`), `thinking_mode`.
+**LLM mode** (`enhancer.llm`): Generates a dense retrieval paragraph covering key terms, related concepts, and likely document content. For follow-up questions, rewrites using conversation history first.
 
-**Local mode** (`enhancer.local`):
+| Key | Description |
+| --- | --- |
+| `api_base_url`, `api_key`, `model` | LLM API connection settings. |
+| `temperature` | Default: `0.0`. |
+| `thinking_mode` | Default: `false`. |
+| `distance_threshold` | Cosine distance threshold for this mode. Default: `0.2`. |
+
+**Local mode** (`enhancer.local`): Translates the question to `docs_lang` via MarianMT. No term replacement, no context rewrite.
 
 | Key | Description |
 | --- | --- |
 | `query_lang` | Language you ask questions in (e.g., `"zh"`, `"en"`). |
 | `model_name` | HuggingFace model ID (optional). Auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` if omitted. |
+| `distance_threshold` | Cosine distance threshold for this mode. Default: `0.3`. |
 
 ### Answer Generation (`llm`)
 
@@ -167,7 +197,7 @@ lib/
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)
 ├── vector_db.py        # Chroma vector store operations
 ├── llm_api.py          # remote LLM API client (OpenAI-compatible)
-├── query_enhancer.py   # query enhancement (translation + rewording)
+├── query_enhancer.py   # query enhancement (retrieval-optimized rewriting)
 └── local_translator.py # MarianMT local translation backend
 ```
 

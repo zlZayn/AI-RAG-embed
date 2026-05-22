@@ -191,19 +191,19 @@ def _init_ask_chat(config: dict):
             thinking_mode=config["llm"].get("thinking_mode", False),
         )
 
-    query_enhancer = _init_enhancer(config)
+    query_enhancer, enhancer_threshold = _init_enhancer(config)
 
     system_prompt = _build_system_prompt(
         config.get("system_rules", ""), config.get("strict_context", False)
     )
 
-    return store, llm, query_enhancer, system_prompt
+    return store, llm, query_enhancer, system_prompt, enhancer_threshold
 
 
 def _init_enhancer(config: dict):
-    """Initialize query enhancer from config. Returns None if disabled."""
+    """Initialize query enhancer from config. Returns (enhancer, threshold) or (None, None)."""
     if not config.get("query_enhance_enabled", False):
-        return None
+        return None, None
 
     from lib.query_enhancer import QueryEnhancer
     from lib.llm_api import LlmApi
@@ -222,7 +222,9 @@ def _init_enhancer(config: dict):
                 docs_lang=docs_lang,
                 model_name=local_cfg.get("model_name"),
             )
-            return QueryEnhancer(translator=translator, docs_lang=docs_lang)
+            enhancer = QueryEnhancer(translator=translator, docs_lang=docs_lang)
+            threshold = local_cfg.get("distance_threshold")
+            return enhancer, threshold
         elif mode == "llm":
             llm_cfg = enhancer_cfg["llm"]
             enhancer_llm = LlmApi(
@@ -232,7 +234,9 @@ def _init_enhancer(config: dict):
                 temperature=llm_cfg.get("temperature", 0.0),
                 thinking_mode=llm_cfg.get("thinking_mode", False),
             )
-            return QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
+            enhancer = QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
+            threshold = llm_cfg.get("distance_threshold")
+            return enhancer, threshold
         else:
             raise ValueError(
                 f"Invalid enhancer mode: '{mode}'. Must be 'local' or 'llm'."
@@ -243,14 +247,17 @@ def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
     """Search only: retrieve document chunks without LLM generation."""
     store, _ = _init_embed_store(config)
 
+    distance_threshold = config.get("retrieval_distance_threshold")
+
     if use_enhancer:
-        enhancer = _init_enhancer(config)
+        enhancer, enhancer_threshold = _init_enhancer(config)
         if enhancer:
             question = enhancer.enhance(question)
-            print(f">> Enhanced: {question}")
+            print(f">> {enhancer.label}: {question}")
+            if enhancer_threshold is not None and not config.get("_cli_threshold"):
+                distance_threshold = enhancer_threshold
 
     k = config.get("retrieval_k", 3)
-    distance_threshold = config.get("retrieval_distance_threshold")
     chunks = store.query(question, k=k, distance_threshold=distance_threshold)
 
     if not chunks:
@@ -273,7 +280,15 @@ def _stream_answer(llm, messages: list[dict]) -> str:
 
 
 def cmd_ask(config: dict, question: str) -> None:
-    store, llm, query_enhancer, system_prompt = _init_ask_chat(config)
+    store, llm, query_enhancer, system_prompt, enhancer_threshold = _init_ask_chat(
+        config
+    )
+
+    distance_threshold = (
+        enhancer_threshold
+        if enhancer_threshold is not None and not config.get("_cli_threshold")
+        else config.get("retrieval_distance_threshold")
+    )
 
     chunks, messages, rewritten_question, enhance_label = _retrieve_context(
         store,
@@ -281,7 +296,7 @@ def cmd_ask(config: dict, question: str) -> None:
         question,
         system_prompt,
         retrieval_k=config.get("retrieval_k", 3),
-        retrieval_distance_threshold=config.get("retrieval_distance_threshold"),
+        retrieval_distance_threshold=distance_threshold,
         query_enhancer=query_enhancer,
     )
     if not chunks:
@@ -345,7 +360,15 @@ def cmd_build(config: dict, force: bool = False) -> None:
 
 
 def cmd_chat(config: dict) -> None:
-    store, llm, query_enhancer, system_prompt = _init_ask_chat(config)
+    store, llm, query_enhancer, system_prompt, enhancer_threshold = _init_ask_chat(
+        config
+    )
+
+    distance_threshold = (
+        enhancer_threshold
+        if enhancer_threshold is not None and not config.get("_cli_threshold")
+        else config.get("retrieval_distance_threshold")
+    )
 
     print("\nReady. Type your question (or /exit /quit /q to quit).\n")
 
@@ -374,7 +397,7 @@ def cmd_chat(config: dict) -> None:
             question,
             system_prompt,
             retrieval_k=config.get("retrieval_k", 3),
-            retrieval_distance_threshold=config.get("retrieval_distance_threshold"),
+            retrieval_distance_threshold=distance_threshold,
             query_enhancer=query_enhancer,
             messages_history=recent_history,
         )
@@ -401,21 +424,41 @@ def cmd_chat(config: dict) -> None:
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--build", action="store_true")
+    parser.add_argument("--rebuild", action="store_true")
+    parser.add_argument("--search", action="store_true")
+    parser.add_argument("--enhance", action="store_true")
+    parser.add_argument("--retrieval_k", type=int)
+    parser.add_argument("--retrieval_distance_threshold", type=float)
+    parser.add_argument("--strict_context", type=str)
+    parser.add_argument("question", nargs="*")
+    args, _ = parser.parse_known_args()
+
     with _timed("Loading config"):
         config = load_config()
 
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--build":
-            cmd_build(config)
-        elif sys.argv[1] == "--rebuild":
-            cmd_build(config, force=True)
-        elif sys.argv[1] == "--search":
-            args = sys.argv[2:]
-            use_enhancer = "--enhance" in args
-            question = " ".join(a for a in args if a != "--enhance")
-            cmd_search(config, question, use_enhancer=use_enhancer)
-        else:
-            cmd_ask(config, " ".join(sys.argv[1:]))
+    # CLI overrides
+    if args.retrieval_k is not None:
+        config["retrieval_k"] = args.retrieval_k
+    if args.retrieval_distance_threshold is not None:
+        config["retrieval_distance_threshold"] = args.retrieval_distance_threshold
+        config["_cli_threshold"] = True
+    if args.strict_context is not None:
+        config["strict_context"] = args.strict_context.lower() in ("true", "1", "yes")
+
+    question = " ".join(args.question)
+
+    if args.build:
+        cmd_build(config)
+    elif args.rebuild:
+        cmd_build(config, force=True)
+    elif args.search:
+        cmd_search(config, question, use_enhancer=args.enhance)
+    elif question:
+        cmd_ask(config, question)
     else:
         cmd_chat(config)
 

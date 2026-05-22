@@ -43,9 +43,15 @@ History:
 
 Latest question: {question}
 Rewritten:"""
-        return f"""Translate the following question to {self._docs_lang}. Keep the original meaning.
-If the question contains technical terms in another language, replace them with their {self._docs_lang} equivalents.
-Output only the translated question, no explanation.
+        return f"""You are a retrieval query optimizer. Your output is used ONLY for vector similarity search, never shown to the user.
+
+Given a user question, produce a dense retrieval paragraph in {self._docs_lang} that maximizes the chance of matching relevant document chunks. Include:
+1. The core topic expressed as a clear statement
+2. Key technical terms and their full forms
+3. Related concepts that relevant document sections might discuss
+4. Brief descriptions of what answers might cover
+
+Write 3-5 natural sentences. No formatting, no explanation, no bullet points.
 
 Question: {question}
 Output:"""

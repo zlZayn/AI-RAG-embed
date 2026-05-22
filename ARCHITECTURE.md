@@ -14,7 +14,7 @@ Local RAG system with two phases:
 
 ### Query Phase
 
-1. (Optional) Enhance user question: translate to `docs_lang` to improve retrieval. In LLM mode, also rephrase and resolve conversation references
+1. (Optional) Enhance user question for retrieval. In LLM mode, generate a retrieval-optimized paragraph in `docs_lang`. In local mode, translate to `docs_lang`. For follow-up questions, rewrite using conversation history first
 2. Convert enhanced question to vector embedding
 3. Retrieve top-k most similar chunks from the vector database
 4. Send **original** question + retrieved chunks to a remote LLM as context (enhanced question is retrieval-only, preserving the user's language for the answer)
@@ -35,7 +35,7 @@ lib/
 ├── embed_engine.py     # SentenceTransformer wrapper
 ├── vector_db.py       # Chroma PersistentClient + incremental rebuild via file hash diff
 ├── llm_api.py         # openai.OpenAI wrapper
-├── query_enhancer.py  # query enhancement (translation + rewording)
+├── query_enhancer.py  # query enhancement (retrieval-optimized rewriting)
 └── local_translator.py # MarianMT local translation backend
 ```
 
@@ -46,15 +46,15 @@ lib/
 | Field | Group | Description |
 | --- | --- | --- |
 | `docs_dir` | Indexing | Source document directory |
-| `docs_lang` | Indexing | Target language for question translation |
+| `docs_lang` | Indexing | Target language for enhancer output |
 | `chunk_size` | Indexing | Target characters per chunk (splits at natural boundaries) |
 | `chunk_overlap` | Indexing | Overlapping characters between adjacent chunks |
 | `embedding_model_name` | Indexing | HuggingFace model ID |
 | `chroma_persist_dir` | Indexing | Chroma persistence directory |
 | `retrieval_k` | Retrieval | Number of chunks to retrieve (Default: `3`) |
-| `retrieval_distance_threshold` | Retrieval | Cosine distance threshold. Only returns chunks with distance below this value. Distance = 1 - similarity (Default: `0.3`, i.e. similarity > 0.7). `null` disables filtering. |
+| `retrieval_distance_threshold` | Retrieval | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in enhancer config when enhancement is enabled. `null` disables filtering (Default: `0.3`) |
 | `query_enhance_enabled` | Enhancement | Enable query enhancement (Default: `false`) |
-| `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (API) or `"local"` (MarianMT) |
+| `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (retrieval-optimized paragraph) or `"local"` (MarianMT translation). Each mode has its own `distance_threshold`. |
 | `llm` | Generation | LLM model config (api_base_url, api_key, model, temperature (Default: `0.3`), thinking_mode) |
 | `max_history_rounds` | Behavior | Recent conversation rounds to keep (Default: `10`) |
 | `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (Default: `false`) |
@@ -74,6 +74,10 @@ python rag_qa.py --search --enhance "q"→  cmd_search(use_enhancer=True)  (retr
 python rag_qa.py --build               →  cmd_build()            (incremental build)
 python rag_qa.py --rebuild             →  cmd_build(force=True)  (full rebuild)
 ```
+
+Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`. These override the corresponding `config.json` fields; if omitted, config values (or code defaults) are used. CLI override takes highest priority, even over per-mode enhancer thresholds.
+
+Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunk_size`, `chunk_overlap`, `embedding_model_name`) are intentionally excluded: changing them requires a full `--rebuild`, which is a deliberate operation that should not be triggered accidentally by a CLI flag.
 
 Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_embed_store()`. `cmd_search` and `cmd_build` call `_init_embed_store()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` first checks for file changes using only stdlib `json`; `_import_lib()` is called only when changes are detected. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
 
@@ -111,6 +115,8 @@ cmd_build()
 
 `--rebuild` skips change detection and forces a full delete-then-add cycle. `--build` reads `build_meta.json` via stdlib `json` only — no `sentence-transformers`, `chromadb`, or `openai` imported when no files changed.
 
+Change detection compares file content hashes only. Config changes to `chunk_size`, `chunk_overlap`, or `embedding_model_name` are not detected — use `--rebuild` after changing these.
+
 `rebuild()` performs incremental updates by comparing file content hashes stored in `build_meta.json`. Only changed, added, or removed files are re-embedded. `rebuild_full()` does a full delete-then-add cycle for when a clean rebuild is needed.
 
 ## Query Workflow
@@ -126,7 +132,7 @@ cmd_search(question, use_enhancer=True)
 ├─► _init_embed_store(config)          →  store
 ├─► _init_enhancer(config)             →  enhancer
 ├─► enhancer.enhance(question)         →  rewritten_question
-│   (same logic as _retrieve_context: LLM translation+term replacement, or local MarianMT)
+│   (same logic as _retrieve_context: LLM retrieval-paragraph, or local MarianMT)
 ├─► store.query(rewritten_question, k, distance_threshold)
 └─► print chunks to stdout
 ```
@@ -137,8 +143,8 @@ _retrieve_context(..., retrieval_distance_threshold=None) -> RetrieveResult(chun
 │
 ├─► [optional] query_enhancer.enhance(question, messages_history)
 │   ├─ LLM mode:
-│   │   With history: rewrite as standalone query (resolve pronouns/ellipsis), then translate to docs_lang
-│   │   Without history: translate to docs_lang, replace technical terms with target-language equivalents
+│   │   Without history: generate retrieval-optimized paragraph in docs_lang
+│   │   With history: rewrite as standalone query (resolve pronouns/ellipsis), then generate retrieval paragraph
 │   └─ Local mode: translate to docs_lang via MarianMT (no rewrite, no term replacement)
 │
 ├─► print ">> Retrieving..."
@@ -167,7 +173,7 @@ If no relevant chunks are found, the system prints a message and skips the round
 
 ### _init_enhancer(config)
 
-Shared helper that initializes the query enhancer from config. Returns `None` if `query_enhance_enabled` is `false`. Used by both `cmd_search(use_enhancer=True)` and `_init_ask_chat()`. Avoids duplicating the enhancer initialization logic (local vs LLM mode selection, translator/LLM setup).
+Shared helper that initializes the query enhancer from config. Returns `(enhancer, threshold)` tuple — `(None, None)` if `query_enhance_enabled` is `false`. The `threshold` is the per-mode `distance_threshold` from the active enhancer config (local or llm). Used by both `cmd_search(use_enhancer=True)` and `_init_ask_chat()`. Callers use the enhancer threshold when available, falling back to the global `retrieval_distance_threshold`.
 
 ### Chunk Sanitization
 
@@ -300,8 +306,8 @@ Two backends, selected by which constructor argument is provided:
 
 **LLM mode** (`llm_api` provided):
 
-- With conversation history (`cmd_chat` follow-up questions): Constructs a prompt containing the full conversation, asks the LLM to rewrite the latest question as a standalone query (resolving pronouns and ellipsis), then translates to `docs_lang`.
-- Without history (`cmd_ask` single question): Constructs a translation prompt with term-replacement instructions. The LLM translates the question to `docs_lang` and replaces technical terms with their target-language equivalents.
+- Without history (`cmd_ask` single question): Generates a dense retrieval paragraph in `docs_lang` covering the core topic, key technical terms, related concepts, and likely document content. Optimized for vector similarity matching, not human readability.
+- With conversation history (`cmd_chat` follow-up questions): Rewrites the latest question as a standalone query using conversation context (resolving pronouns/ellipsis), then generates the retrieval paragraph.
 
 **Local mode** (`translator` provided):
 
