@@ -1,5 +1,11 @@
 # Architecture
 
+## Design Philosophy
+
+Most RAG systems embed the user's raw question directly into the vector space and hope the embedding model bridges the gap. It often doesn't. A question like "ARIMA 怎么选参数?" is concise and natural for a human, but a poor match for document chunks that discuss "order determination via AIC/BIC criteria" and "automated model selection with auto_arima." The embedding model may bridge the semantic gap, or it may not — and when it fails, the user gets irrelevant chunks with no obvious way to fix it.
+
+In the AI era, calling an LLM as a thin middleware layer costs almost nothing but returns disproportionately. The enhancer rewrites the user's question into a dense retrieval paragraph optimized for vector similarity matching. The rewritten query is used only for retrieval; the answer LLM always receives the original question.
+
 ## Overview
 
 Local RAG system with two phases:

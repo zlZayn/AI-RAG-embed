@@ -10,7 +10,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 # Output directory
-OUTPUT_DIR = Path("/workspace/fpp3_textbook")
+OUTPUT_DIR = Path(__file__).parent
 
 # Delay between requests (be respectful to server)
 DELAY = 0.5
@@ -19,7 +19,6 @@ DELAY = 0.5
 PAGES = {
     # Preface
     "index": "0",
-    
     # Chapter 1
     "intro": "1",
     "what-can-be-forecast": "1.1",
@@ -31,7 +30,6 @@ PAGES = {
     "perspective": "1.7",
     "intro-exercises": "1.8",
     "intro-reading": "1.9",
-    
     # Chapter 2
     "graphics": "2",
     "tsibbles": "2.1",
@@ -45,7 +43,6 @@ PAGES = {
     "wn": "2.9",
     "graphics-exercises": "2.10",
     "graphics-reading": "2.11",
-    
     # Chapter 3
     "decomposition": "3",
     "transformations": "3.1",
@@ -56,7 +53,6 @@ PAGES = {
     "stl": "3.6",
     "decomposition-exercises": "3.7",
     "decomposition-reading": "3.8",
-    
     # Chapter 4
     "features": "4",
     "some-simple-statistics": "4.1",
@@ -66,7 +62,6 @@ PAGES = {
     "exploring-australian-tourism-data": "4.5",
     "feast-exercises": "4.6",
     "further-reading": "4.7",
-    
     # Chapter 5
     "toolbox": "5",
     "a-tidy-forecasting-workflow": "5.1",
@@ -81,7 +76,6 @@ PAGES = {
     "tscv": "5.10",
     "toolbox-exercises": "5.11",
     "basics-reading": "5.12",
-    
     # Chapter 6
     "judgmental": "6",
     "judgmental-limitations": "6.1",
@@ -92,7 +86,6 @@ PAGES = {
     "new-products": "6.6",
     "judgmental-adjustments": "6.7",
     "judgmental-reading": "6.8",
-    
     # Chapter 7
     "regression": "7",
     "regression-intro": "7.1",
@@ -106,7 +99,6 @@ PAGES = {
     "regression-matrices": "7.9",
     "regression-exercises": "7.10",
     "regression-reading": "7.11",
-    
     # Chapter 8
     "expsmooth": "8",
     "ses": "8.1",
@@ -118,7 +110,6 @@ PAGES = {
     "ets-forecasting": "8.7",
     "expsmooth-exercises": "8.8",
     "expsmooth-reading": "8.9",
-    
     # Chapter 9
     "arima": "9",
     "stationarity": "9.1",
@@ -133,7 +124,6 @@ PAGES = {
     "arima-ets": "9.10",
     "arima-exercises": "9.11",
     "arima-reading": "9.12",
-    
     # Chapter 10
     "dynamic": "10",
     "estimation": "10.1",
@@ -144,7 +134,6 @@ PAGES = {
     "lagged-predictors": "10.6",
     "dynamic-exercises": "10.7",
     "dynamic-reading": "10.8",
-    
     # Chapter 11
     "hierarchical": "11",
     "hts": "11.1",
@@ -155,7 +144,6 @@ PAGES = {
     "prison": "11.6",
     "hierarchical-exercises": "11.7",
     "hierarchical-reading": "11.8",
-    
     # Chapter 12
     "advanced": "12",
     "complexseasonality": "12.1",
@@ -165,7 +153,6 @@ PAGES = {
     "bootstrap": "12.5",
     "advanced-exercises": "12.6",
     "advanced-reading": "12.7",
-    
     # Chapter 13
     "practical": "13",
     "weekly": "13.1",
@@ -178,7 +165,6 @@ PAGES = {
     "training-test": "13.8",
     "missing-outliers": "13.9",
     "further-reading-1": "13.10",
-    
     # Appendix
     "appendix-using-r": "A",
     "appendix-for-instructors": "B",
@@ -218,7 +204,7 @@ def fetch_with_curl(url):
             ["curl", "-s", "-L", "--max-time", "30", url],
             capture_output=True,
             text=True,
-            timeout=35
+            timeout=35,
         )
         return result.stdout if result.returncode == 0 else None
     except Exception as e:
@@ -230,30 +216,32 @@ def extract_content(html):
     """Extract content with section numbers preserved."""
     if not html:
         return None, None
-    
+
     soup = BeautifulSoup(html, "html.parser")
-    
+
     # Find main content
     content = soup.find("div", class_="book-body")
     if not content:
         content = soup.find("body")
     if not content:
         return None, None
-    
+
     # Get section title
     title = None
     h1 = soup.find("h1")
     if h1:
         title = h1.get_text(strip=True)
-    
+
     lines = []
-    
+
     # Process all headings and content
-    for element in content.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "pre"]):
+    for element in content.find_all(
+        ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "pre"]
+    ):
         text = element.get_text(strip=True)
         if not text:
             continue
-            
+
         if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
             level = int(element.name[1])
             lines.append(f"\n{'#' * level} {text}\n")
@@ -266,14 +254,14 @@ def extract_content(html):
         elif element.name == "pre":
             code = element.get_text()
             lines.append(f"\n```\n{code}\n```\n")
-    
+
     return title, "\n".join(lines)
 
 
 def get_filename(section_num, slug):
     """Generate filename with section number prefix."""
     clean_slug = slug.replace("-", "_")
-    
+
     if section_num == "0":
         return "preface.md"
     elif section_num in ["A", "B", "C", "D", "E"]:
@@ -289,42 +277,42 @@ def main():
     print("=" * 60)
     print("FPP3 Textbook Scraper (with section numbers)")
     print("=" * 60)
-    
+
     # Create output directory
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     success = 0
     failed = []
-    
+
     for slug, section_num in PAGES.items():
         url = f"https://otexts.com/fpp3/{slug}.html"
-        
+
         # Determine directory
         chapter_num = section_num.split(".")[0] if "." in section_num else section_num
         chapter_dir = CHAPTER_DIRS.get(chapter_num, "99_appendix")
-        
+
         dir_path = OUTPUT_DIR / chapter_dir
         dir_path.mkdir(parents=True, exist_ok=True)
-        
+
         # Fetch and extract
         html = fetch_with_curl(url)
         title, content = extract_content(html)
-        
+
         if content:
             filename = get_filename(section_num, slug)
             filepath = dir_path / filename
-            
+
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
-            
+
             print(f"[{section_num}] {slug} -> {chapter_dir}/{filename}")
             success += 1
         else:
             failed.append((section_num, slug))
             print(f"[{section_num}] FAILED: {slug}")
-        
+
         time.sleep(DELAY)
-    
+
     print("\n" + "=" * 60)
     print(f"Complete: {success} success, {len(failed)} failed")
     if failed:
