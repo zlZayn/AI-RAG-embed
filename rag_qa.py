@@ -139,9 +139,11 @@ def _retrieve_context(
     question,
     system_prompt,
     retrieval_k,
+    retrieval_distance_threshold=None,
     query_enhancer=None,
     messages_history=None,
 ) -> RetrieveResult:
+    """检索相关文档块。"""
     rewritten_question = question
     enhance_label = "Enhanced Question"
 
@@ -152,7 +154,11 @@ def _retrieve_context(
         enhance_label = query_enhancer.label
 
     print("\r\033[K>> Retrieving... ", end="", flush=True)
-    chunks = store.query(rewritten_question, k=retrieval_k)
+    chunks = store.query(
+        rewritten_question,
+        k=retrieval_k,
+        distance_threshold=retrieval_distance_threshold,
+    )
     if not chunks:
         print("\r\033[K>> No relevant chunks found. Skipping.\n")
         return RetrieveResult([], None, rewritten_question, enhance_label)
@@ -235,7 +241,8 @@ def cmd_search(config: dict, question: str) -> None:
     store, _ = _init_embed_store(config)
 
     k = config.get("retrieval_k", 3)
-    chunks = store.query(question, k=k)
+    distance_threshold = config.get("retrieval_distance_threshold")
+    chunks = store.query(question, k=k, distance_threshold=distance_threshold)
 
     if not chunks:
         print(">> No relevant chunks found.")
@@ -264,8 +271,9 @@ def cmd_ask(config: dict, question: str) -> None:
         llm,
         question,
         system_prompt,
-        config.get("retrieval_k", 3),
-        query_enhancer,
+        retrieval_k=config.get("retrieval_k", 3),
+        retrieval_distance_threshold=config.get("retrieval_distance_threshold"),
+        query_enhancer=query_enhancer,
     )
     if not chunks:
         return
@@ -356,8 +364,9 @@ def cmd_chat(config: dict) -> None:
             llm,
             question,
             system_prompt,
-            config.get("retrieval_k", 3),
-            query_enhancer,
+            retrieval_k=config.get("retrieval_k", 3),
+            retrieval_distance_threshold=config.get("retrieval_distance_threshold"),
+            query_enhancer=query_enhancer,
             messages_history=recent_history,
         )
         if not chunks:

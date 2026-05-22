@@ -23,7 +23,7 @@ Local RAG system with two phases:
 ## Directory Structure
 
 ```text
-rag_qa.py           # single entry point
+rag_qa.py               # single entry point
 config.json             # runtime config (gitignored)
 config_example.json     # config template (committed)
 documents/              # raw .txt / .md files
@@ -41,7 +41,7 @@ lib/
 
 ## Configuration
 
-`rag_qa.py` reads `config.json` at startup. No lib module reads the config directly -- they receive only the parameters they need.
+`rag_qa.py` reads `config.json` at startup. No lib module reads the config directly -- they receive only the parameters they need. "Default" below refers to the code's hardcoded fallback when a key is omitted.
 
 | Field | Group | Description |
 | --- | --- | --- |
@@ -52,6 +52,7 @@ lib/
 | `embedding_model_name` | Indexing | HuggingFace model ID |
 | `chroma_persist_dir` | Indexing | Chroma persistence directory |
 | `retrieval_k` | Retrieval | Number of chunks to retrieve (Default: `3`) |
+| `retrieval_distance_threshold` | Retrieval | Cosine distance threshold. Only returns chunks with distance below this value. Distance = 1 - similarity (Default: `0.3`, i.e. similarity > 0.7). `null` disables filtering. |
 | `query_enhance_enabled` | Enhancement | Enable query enhancement (Default: `false`) |
 | `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (API) or `"local"` (MarianMT) |
 | `llm` | Generation | LLM model config (api_base_url, api_key, model, temperature (Default: `0.3`), thinking_mode) |
@@ -60,18 +61,6 @@ lib/
 | `system_rules` | Behavior | Additional system prompt rules (Default: `""`) |
 
 Relative paths (`./`) are resolved against the project root.
-
-## System Prompt
-
-Two modes controlled by `strict_context`:
-
-**strict_context = false** (default):
-> You are a helpful assistant. Use the provided context to enrich your answer, but also draw on your own knowledge when the context is insufficient. If the context is provided, prefer it over your own knowledge for factual claims.
-
-**strict_context = true**:
-> You are a helpful assistant. Answer the user's question based ONLY on the provided context. If the answer is not in the context, say 'I don't know'.
-
-If `system_rules` is set, it is appended after the base prompt.
 
 ## Entry Point
 
@@ -130,7 +119,7 @@ Both `cmd_ask` and `cmd_chat` share `_init_ask_chat()` for engine initialization
 `cmd_search` uses only `_init_embed_store()` for retrieval without LLM generation.
 
 ```text
-_retrieve_context(...) -> RetrieveResult(chunks, messages, rewritten_question, enhance_label)
+_retrieve_context(..., retrieval_distance_threshold=None) -> RetrieveResult(chunks, messages, rewritten_question, enhance_label)
 ├─► print ">> Processing..."
 │
 ├─► [optional] query_enhancer.enhance(question, messages_history)
@@ -140,11 +129,14 @@ _retrieve_context(...) -> RetrieveResult(chunks, messages, rewritten_question, e
 │   └─ Local mode: translate to docs_lang via MarianMT (no rewrite, no term replacement)
 │
 ├─► print ">> Retrieving..."
-├─► store.query(rewritten_question, k)
+├─► store.query(rewritten_question, k, distance_threshold)
 │   ├─ embed_engine.get_embedding(rewritten_question)  →  vector
-│   └─ collection.query(query_embeddings, n_results=k)
-│       Chroma cosine similarity search
-│       returns top-k document chunks
+│   ├─ collection.query(query_embeddings, n_results=k)
+│   │   Chroma cosine similarity search
+│   │   returns top-k document chunks
+│   └─ filter by distance_threshold (if set)
+│       discard chunks with distance >= threshold
+│       if none pass, return top-1 as fallback
 │
 ├─► print ">> Retrieved N chunks. Generating..."
 │
@@ -159,6 +151,67 @@ The answer LLM always receives the **original question** to preserve the user's 
 ```
 
 If no relevant chunks are found, the system prints a message and skips the round.
+
+### Chunk Sanitization
+
+Retrieved chunks are sanitized before wrapping to prevent Markdown rendering corruption:
+
+1. `strip("`")` -- removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
+2. `replace("```", "``")` -- reduces any remaining triple-backtick to double-backtick (prevents premature fence closure).
+
+After sanitization, the context block is wrapped in a standard 3-backtick fence with `text` info string.
+
+## System Prompt
+
+Two modes controlled by `strict_context`:
+
+**strict_context = false** (default):
+> You are a helpful assistant. Use the provided context to enrich your answer, but also draw on your own knowledge when the context is insufficient. If the context is provided, prefer it over your own knowledge for factual claims.
+
+**strict_context = true**:
+> You are a helpful assistant. Answer the user's question based ONLY on the provided context. If the answer is not in the context, say 'I don't know'.
+
+If `system_rules` is set, it is appended after the base prompt.
+
+## Output Export
+
+After each Q&A round, `_export_round()` writes a Markdown file:
+
+```text
+output/<sanitized_question>_<YYYYMMDD_HHMMSS>/
+├── 01_round.md
+└── 02_round.md
+```
+
+Each round file:
+
+========== *Round 1* ==========
+
+**Question:**
+
+```text
+{original question}
+```
+
+**Enhanced Question:** (LLM mode) / **Translated Question:** (local mode)
+
+```text
+{processed question}
+```
+
+**Answer:**
+
+...
+
+========== *Retrieved Context* ==========
+
+```text
+{chunk 1 content}
+```
+
+```text
+{chunk 2 content}
+```
 
 ## Module Details
 
@@ -196,7 +249,7 @@ EmbedEngine(model_name)
 VectorDb(persist_dir, embed_engine=None)
   .rebuild(chunks, file_hashes) -> None    # incremental: only re-embed changed files
   .rebuild_full(chunks, file_hashes) -> None  # full delete-then-add
-  .query(question, k) -> list[str]
+  .query(question, k, distance_threshold=None) -> list[str]
 ```
 
 - `chromadb.PersistentClient` with cosine distance (`hnsw:space: "cosine"`).
@@ -248,60 +301,11 @@ LocalTranslator(query_lang, docs_lang, model_name=None)
 
 - Loads a Helsinki-NLP MarianMT model via `transformers.MarianMTModel` and `MarianTokenizer`.
 - Model loaded via `from_pretrained` with `local_files_only=True` first (avoids network calls when cached). Falls back to network download if not cached.
-- `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` (e.g., `query_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`). To use a different model series, pass `model_name` explicitly via config.
+- `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` (e.g., `query_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`). To use a different model series, pass `model_name` explicitly in `config.json`.
 - `HF_ENDPOINT` set to `https://hf-mirror.com` via `os.environ.setdefault` (China mirror, does not override user-set values).
 - Class-level cache (`_cache` dict): keyed by model name. Same language pair shares one loaded model across all instances within the process.
 - First load downloads from HuggingFace (approx. 300 MB). Subsequent loads read from the local HuggingFace cache (`~/.cache/huggingface/`).
 - `translate()`: tokenizes input, runs `model.generate()`, decodes output tokens. Returns the translated string.
-
-## Output Export
-
-After each Q&A round, `_export_round()` writes a Markdown file:
-
-```text
-output/<sanitized_question>_<YYYYMMDD_HHMMSS>/
-├── 01_round.md
-└── 02_round.md
-```
-
-Each round file:
-
-========== *Round 1* ==========
-
-**Question:**
-
-```text
-{original question}
-```
-
-**Enhanced Question:** (LLM mode) / **Translated Question:** (local mode)
-
-```text
-{processed question}
-```
-
-**Answer:**
-
-...
-
-========== *Retrieved Context* ==========
-
-```text
-{chunk 1 content}
-```
-
-```text
-{chunk 2 content}
-```
-
-### Chunk Sanitization
-
-Retrieved chunks are sanitized before wrapping to prevent Markdown rendering corruption:
-
-1. `strip("`")` -- removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
-2. `replace("```", "``")` -- reduces any remaining triple-backtick to double-backtick (prevents premature fence closure).
-
-After sanitization, the context block is wrapped in a standard 3-backtick fence with `text` info string.
 
 ## Environment Setup
 

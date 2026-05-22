@@ -96,12 +96,46 @@ class VectorDb:
 
         self._save_meta(file_hashes)
 
-    def query(self, question: str, k: int = 3) -> list[str]:
+    def query(
+        self, question: str, k: int = 3, distance_threshold: float = None
+    ) -> list[str]:
+        """检索最相似的文档块，可选按余弦距离阈值过滤。"""
         question_embedding = self._embed_engine.get_embedding(question)
 
         results = self._collection.query(
             query_embeddings=[question_embedding],
             n_results=k,
+            include=["documents", "distances"],
         )
 
-        return results["documents"][0] if results["documents"] else []
+        documents = results["documents"][0] if results["documents"] else []
+        distances = results["distances"][0] if results["distances"] else []
+
+        if not documents:
+            return []
+
+        # 打印距离信息用于调试
+        print("\n>> Retrieval details:")
+        for i, (doc, dist) in enumerate(zip(documents, distances)):
+            similarity = 1 - dist  # 转换距离到相似度
+            print(f"  Chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}")
+
+        # 如果设置了阈值，过滤结果
+        if distance_threshold is not None:
+            filtered = [
+                (doc, dist)
+                for doc, dist in zip(documents, distances)
+                if dist < distance_threshold
+            ]
+            if filtered:
+                documents = [item[0] for item in filtered]
+                print(
+                    f">> Filtered to {len(documents)} chunks (threshold={distance_threshold})"
+                )
+            else:
+                print(
+                    f">> No chunks passed threshold={distance_threshold}, returning top result anyway"
+                )
+                documents = [documents[0]]  # 至少返回一个
+
+        return documents

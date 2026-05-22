@@ -9,7 +9,7 @@ Drop your .txt/.md files into `documents/`, embed them locally to build the inde
 ```bash
 pip install -r requirements.txt
 
-# 1. Copy config and fill in your API key
+# 1. Copy config_example.json to config.json and fill in your API key
 cp config_example.json config.json
 
 # 2. Put your .txt / .md files in documents/
@@ -70,7 +70,7 @@ Returns the top `retrieval_k` chunks (default: 3) directly to stdout.
 
 ## Configuration
 
-Copy `config_example.json` to `config.json` and edit. Relative paths (`./`) are resolved against the project root.
+Edit `config.json` to configure the system. Relative paths (`./`) are resolved against the project root. "Default" below refers to the code's hardcoded fallback when a key is omitted.
 
 ### Document & Indexing
 
@@ -86,7 +86,7 @@ Copy `config_example.json` to `config.json` and edit. Relative paths (`./`) are 
 > **Switching models**: The code has model-specific defaults that may need manual adjustment:
 >
 > - **Embedding model**: A query prefix is hardcoded for the mxbai model family. Other models (e.g., `all-MiniLM-L6-v2`) do not use it — leaving it in will hurt retrieval. Check `lib/embed_engine.py` `_QUERY_PREFIX`.
-> - **Translation model**: The local enhancer auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`. To use a different model series, set `model_name` explicitly in config.
+> - **Translation model**: The local enhancer auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`. To use a different model series, set `model_name` explicitly in `config.json`.
 > - **HuggingFace mirror**: `hf-mirror.com` is set as the default endpoint for users in China. Remove or override `HF_ENDPOINT` if you have direct access to HuggingFace.
 
 ### Retrieval
@@ -94,6 +94,7 @@ Copy `config_example.json` to `config.json` and edit. Relative paths (`./`) are 
 | Key | Description |
 | --- | --- |
 | `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
+| `retrieval_distance_threshold` | Cosine distance threshold. Only returns chunks with distance below this value. Distance = 1 - similarity, range [0, 2]. Lower = more similar. Default: `0.3` (similarity > 0.7). Set `null` to disable filtering. |
 
 ### Query Enhancement (`enhancer`)
 

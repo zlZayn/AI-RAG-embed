@@ -6,6 +6,7 @@
     "embedding_model_name": "mixedbread-ai/mxbai-embed-large-v1",
     "chroma_persist_dir": "./chroma_db",
     "retrieval_k": 5,
+    "retrieval_distance_threshold": 0.3,
     "query_enhance_enabled": true,
     "enhancer": {
         "mode": "llm",
