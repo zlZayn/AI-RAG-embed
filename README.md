@@ -70,8 +70,14 @@ Copy `config_example.json` to `config.json` and edit. Relative paths (`./`) are 
 | `docs_lang` | Language of your documents (e.g., `"en"`, `"zh"`). The enhancer translates your question into this language before searching. |
 | `chunk_size` | Target characters per chunk. Larger = more context, less precise retrieval. Typical range: 300-1000. |
 | `chunk_overlap` | Overlapping characters between adjacent chunks. Recommended: 10-20% of `chunk_size`. |
-| `embedding_model_name` | HuggingFace model ID for vector embeddings. |
+| `embedding_model_name` | HuggingFace model ID for vector embeddings. See notes below. |
 | `chroma_persist_dir` | Folder where the vector database is saved. |
+
+> **Switching models**: The code has model-specific defaults that may need manual adjustment:
+>
+> - **Embedding model**: A query prefix is hardcoded for the mxbai model family. Other models (e.g., `all-MiniLM-L6-v2`) do not use it — leaving it in will hurt retrieval. Check `lib/embed_engine.py` `_QUERY_PREFIX`.
+> - **Translation model**: The local enhancer auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`. To use a different model series, set `model_name` explicitly in config.
+> - **HuggingFace mirror**: `hf-mirror.com` is set as the default endpoint for users in China. Remove or override `HF_ENDPOINT` if you have direct access to HuggingFace.
 
 ### Retrieval
 

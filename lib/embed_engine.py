@@ -9,7 +9,10 @@ _QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 class EmbedEngine:
     def __init__(self, model_name: str):
-        self._model = SentenceTransformer(model_name)
+        try:
+            self._model = SentenceTransformer(model_name, local_files_only=True)
+        except Exception:
+            self._model = SentenceTransformer(model_name)
 
     def get_embedding(self, text: str) -> list[float]:
         return self._model.encode(_QUERY_PREFIX + text).tolist()

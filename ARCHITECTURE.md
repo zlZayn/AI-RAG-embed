@@ -179,7 +179,8 @@ EmbedEngine(model_name)
 
 - Wraps `SentenceTransformer`.
 - Sets `HF_ENDPOINT=https://hf-mirror.com` via `os.environ.setdefault` (China mirror, does not override user-set values).
-- `get_embedding(text)` prepends the mxbai query prefix `"Represent this sentence for searching relevant passages: "` before encoding -- required by the mxbai model family for query embeddings.
+- Model loaded with `local_files_only=True` first, falls back to network download if not cached.
+- `get_embedding(text)` prepends the mxbai query prefix `"Represent this sentence for searching relevant passages: "` before encoding -- required by the mxbai model family for query embeddings. Other models do not use this prefix; leaving it in will hurt retrieval. Check `_QUERY_PREFIX` when switching models.
 - `embed_batch(texts)` does **not** add the prefix -- document embeddings should be encoded as-is for correct semantic alignment with query embeddings.
 
 ### lib/vector_db.py
@@ -236,8 +237,9 @@ LocalTranslator(query_lang, docs_lang, model_name=None)
 ```
 
 - Loads a Helsinki-NLP MarianMT model via `transformers.MarianMTModel` and `MarianTokenizer`.
-- Model loaded with `use_safetensors=True` to avoid `torch.load` security restriction (CVE-2025-32434) — works with any torch version.
-- `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` (e.g., `query_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`).
+- Model loaded via `from_pretrained` with `local_files_only=True` first (avoids network calls when cached). Falls back to network download if not cached.
+- `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` (e.g., `query_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`). To use a different model series, pass `model_name` explicitly via config.
+- `HF_ENDPOINT` set to `https://hf-mirror.com` via `os.environ.setdefault` (China mirror, does not override user-set values).
 - Class-level cache (`_cache` dict): keyed by model name. Same language pair shares one loaded model across all instances within the process.
 - First load downloads from HuggingFace (approx. 300 MB). Subsequent loads read from the local HuggingFace cache (`~/.cache/huggingface/`).
 - `translate()`: tokenizes input, runs `model.generate()`, decodes output tokens. Returns the translated string.

@@ -17,8 +17,14 @@ class LocalTranslator:
     @classmethod
     def _load(cls, model_name: str):
         if model_name not in cls._cache:
-            tokenizer = MarianTokenizer.from_pretrained(model_name)
-            model = MarianMTModel.from_pretrained(model_name, use_safetensors=True)
+            try:
+                tokenizer = MarianTokenizer.from_pretrained(
+                    model_name, local_files_only=True
+                )
+                model = MarianMTModel.from_pretrained(model_name, local_files_only=True)
+            except Exception:
+                tokenizer = MarianTokenizer.from_pretrained(model_name)
+                model = MarianMTModel.from_pretrained(model_name)
             cls._cache[model_name] = (tokenizer, model)
         return cls._cache[model_name]
 
