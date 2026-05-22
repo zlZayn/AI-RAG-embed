@@ -67,39 +67,56 @@ Copy `config_example.json` to `config.json` and edit.
 
 | Key | Description |
 | --- | --- |
-| `docs_dir` | Root directory for your `.txt` / `.md` files. All files in this directory (and subdirectories) will be loaded when running `--build`. Supports `.doc_loader_ignore` filtering to exclude specific files. |
-| `docs_lang` | Target language for query enhancement. The enhancer will translate and rephrase the question into this language to match your documents. Use `"en"` for English, `"zh"` for Chinese, etc. |
-| `chunk_size` | Number of characters per text chunk when building the vector index. Larger chunks preserve more context but may dilute retrieval precision. Typical range: 300-1000. |
-| `chunk_overlap` | Number of overlapping characters between adjacent chunks. Prevents semantic fragmentation when concepts span chunk boundaries. Recommended: 10-20% of `chunk_size`. |
-| `embedding_model_name` | HuggingFace model ID used to convert text chunks and queries into vector embeddings. |
-| `retrieval_k` | Number of top-ranked chunks retrieved for each query. More chunks provide more context but increase prompt length and LLM cost. Defaults to 3 if not set. |
-| `chroma_persist_dir` | Directory where the vector database is stored. Automatically created when running `--build`. |
-| `query_enhance_enabled` | Whether to enable query enhancement. When enabled, the enhancer translates and rephrases the question into `docs_lang`, replacing technical terms with their equivalents, to improve retrieval accuracy. In interactive mode, conversation history is used to resolve pronouns and ellipsis (e.g., "what about the second type" → fully rewritten standalone query). |
-| `strict_context` | Controls how the LLM uses its own knowledge. `false` = LLM may blend retrieved context with its own knowledge. `true` = LLM must answer **only** from retrieved chunks and will say "I don't know" if context is insufficient. |
-| `system_rules` | Free-text instructions that are always included in the system prompt. Use to enforce output format, tone, or constraints (e.g., "No emoji. Use $...$ for math formulas."). |
+| `docs_dir` | Folder containing your `.txt` / `.md` files. All files (including subfolders) are loaded when running `--build`. Supports `.doc_loader_ignore` for excluding files. |
+| `docs_lang` | Language of your documents. The enhancer translates your question into this language before searching. Use `"en"` for English, `"zh"` for Chinese, etc. |
+| `chunk_size` | Characters per chunk when building the index. Larger = more context per chunk, but less precise retrieval. Typical range: 300-1000. |
+| `chunk_overlap` | Overlapping characters between adjacent chunks. Prevents sentences at chunk boundaries from being split. Recommended: 10-20% of `chunk_size`. |
+| `embedding_model_name` | HuggingFace model ID for converting text into vector embeddings. |
+| `retrieval_k` | Number of chunks to retrieve per query. More chunks = more context, but longer prompts. Default: 3. |
+| `chroma_persist_dir` | Folder where the vector database is saved. Created automatically by `--build`. |
+| `query_enhance_enabled` | Enable query enhancement. Translates your question into `docs_lang` before searching. In LLM mode, also replaces technical terms and rewrites follow-up questions using conversation history. In local mode, translation only. |
+| `strict_context` | `false` = LLM may use its own knowledge to supplement the answer. `true` = LLM answers **only** from retrieved chunks. |
+| `system_rules` | Extra instructions added to the system prompt (e.g., "No emoji. Use $...$ for math formulas."). |
 
-### Enhancer Model Configuration (`enhancer`)
+### Enhancer Configuration (`enhancer`)
 
-The enhancer model translates and rephrases the user's question into the document language, replacing technical terms with their equivalents. Use a small, fast model for this.
+The enhancer translates your question into the document language before searching. Two backends are available, selected by `mode`.
 
 | Key | Description |
 | --- | --- |
-| `api_base_url` | API endpoint URL for the enhancer model (OpenAI-compatible). |
-| `api_key` | API key for authentication. Keep this secret. |
-| `model` | Model identifier (e.g., `"deepseek-chat"`, `"gpt-3.5-turbo"`). |
-| `temperature` | Sampling temperature for translation. Use `0.0` for deterministic results. |
+| `mode` | `"llm"` = use an LLM API. `"local"` = use a local MarianMT model. |
+
+#### LLM Mode (`mode: "llm"`)
+
+Calls an OpenAI-compatible API. Can translate, replace technical terms, and rewrite follow-up questions using conversation history.
+
+| Key | Description |
+| --- | --- |
+| `api_base_url` | API endpoint URL (OpenAI-compatible). |
+| `api_key` | API key. Keep this secret. |
+| `model` | Model name (e.g., `"deepseek-v4-flash"`, `"gpt-3.5-turbo"`). |
+| `temperature` | Sampling temperature. Use `0.0` for deterministic results. |
 | `thinking_mode` | Enable thinking mode (if supported by your API). |
+
+#### Local Mode (`mode: "local"`)
+
+Runs a MarianMT translation model locally. Fast, offline, no API key needed. Only does translation — does not replace technical terms or rewrite follow-up questions.
+
+| Key | Description |
+| --- | --- |
+| `src_lang` | Language you ask questions in (e.g., `"zh"`, `"en"`). |
+| `model_name` | HuggingFace model ID (optional). If omitted, auto-selects `Helsinki-NLP/opus-mt-{src_lang}-{docs_lang}`. For example, if you ask in Chinese and your docs are in English, it loads `Helsinki-NLP/opus-mt-zh-en`. |
 
 ### Answer Generation Model Configuration (`llm`)
 
-The LLM model generates the final answer from retrieved chunks.
+The LLM that generates the final answer using the retrieved chunks.
 
 | Key | Description |
 | --- | --- |
-| `api_base_url` | API endpoint URL for the answer generation model (OpenAI-compatible). |
-| `api_key` | API key for authentication. Keep this secret. |
-| `model` | Model identifier (e.g., `"deepseek-chat"`, `"gpt-4"`). |
-| `temperature` | Sampling temperature for answer generation. Lower = more deterministic, higher = more creative. Range: 0.0-2.0. |
+| `api_base_url` | API endpoint URL (OpenAI-compatible). |
+| `api_key` | API key. Keep this secret. |
+| `model` | Model name (e.g., `"deepseek-v4-flash"`, `"gpt-4"`). |
+| `temperature` | Lower = more focused, higher = more creative. Range: 0.0-2.0. |
 | `thinking_mode` | Enable thinking mode (if supported by your API). |
 
 ## Document Filtering
@@ -126,7 +143,7 @@ output/
     └── 02_round.md
 ```
 
-Each round file contains the question, answer, enhanced question trace (if query enhancement is enabled), and sanitized retrieved context -- each wrapped in a code fence to prevent Markdown corruption.
+Each round file contains the question, answer, processed question (labeled "Enhanced Question" in LLM mode or "Translated Question" in local mode), and the retrieved chunks used.
 
 ## Project Structure
 
@@ -142,7 +159,8 @@ lib/
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)
 ├── vector_db.py        # Chroma vector store operations
 ├── llm_api.py          # remote LLM API client (OpenAI-compatible)
-└── query_enhancer.py   # query enhancement (question translation + rewording)
+├── query_enhancer.py   # query enhancement (translation + rewording)
+└── local_translator.py # MarianMT local translation backend
 ```
 
 ## Requirements
@@ -150,7 +168,8 @@ lib/
 ### Dependencies
 
 - Python 3.10+
-- `sentence-transformers`, `chromadb`, `openai`, `pathspec`
+- `sentence-transformers`, `chromadb`, `openai`, `pathspec` (core)
+- `transformers`, `sentencepiece`, `sacremoses` (only needed for `mode: "local"`)
 
 ### GPU Setup (Optional)
 

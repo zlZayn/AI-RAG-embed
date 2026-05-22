@@ -84,6 +84,7 @@ def _export_round(
     chunks: list[str],
     answer: str,
     rewritten_question: str | None = None,
+    enhance_label: str = "Enhanced Question",
 ) -> None:
     safe_chunks = [_sanitize_chunk(c) for c in chunks]
     context_blocks = "\n\n".join(f"```text\n{c}\n```" for c in safe_chunks)
@@ -93,7 +94,7 @@ def _export_round(
     text += f"{question}\n"
     text += "```\n\n"
     if rewritten_question and rewritten_question != question:
-        text += "**Enhanced Question:**\n\n```text\n"
+        text += f"**{enhance_label}:**\n\n```text\n"
         text += f"{rewritten_question}\n"
         text += "```\n\n"
     text += f"**Answer:**\n\n{answer}\n\n"
@@ -116,17 +117,19 @@ def _retrieve_context(
     messages_history=None,
 ):
     rewritten_question = question
+    enhance_label = "Enhanced Question"
 
     print(">> Processing... ", end="", flush=True)
 
     if query_enhancer:
         rewritten_question = query_enhancer.enhance(question, messages_history)
+        enhance_label = query_enhancer.label
 
     print("\r\033[K>> Retrieving... ", end="", flush=True)
     chunks = store.query(rewritten_question, k=retrieval_k)
     if not chunks:
         print("\r\033[K>> No relevant chunks found. Skipping.\n")
-        return [], None, rewritten_question
+        return [], None, rewritten_question, enhance_label
 
     print(f"\r\033[K>> Retrieved {len(chunks)} chunks. Generating...")
 
@@ -141,7 +144,7 @@ def _retrieve_context(
         },
     )
 
-    return chunks, messages, rewritten_question
+    return chunks, messages, rewritten_question, enhance_label
 
 
 def _init_ask_chat(config: dict):
@@ -182,16 +185,41 @@ def _init_ask_chat(config: dict):
 
         t0 = time.perf_counter()
         print(">> Initializing query enhancer... ", end="", flush=True)
-        enhancer_llm = LlmApi(
-            api_key=config["enhancer"]["api_key"],
-            base_url=config["enhancer"]["api_base_url"],
-            model=config["enhancer"]["model"],
-            temperature=config["enhancer"].get("temperature", 0.0),
-            thinking_mode=config["enhancer"].get("thinking_mode", False),
-        )
-        query_enhancer = QueryEnhancer(
-            enhancer_llm, docs_lang=config.get("docs_lang", "en")
-        )
+
+        enhancer_cfg = config["enhancer"]
+        mode = enhancer_cfg.get("mode")
+        docs_lang = config.get("docs_lang", "en")
+
+        if mode == "local":
+            from lib.local_translator import LocalTranslator
+
+            local_cfg = enhancer_cfg["local"]
+            translator = LocalTranslator(
+                src_lang=local_cfg["src_lang"],
+                docs_lang=docs_lang,
+                model_name=local_cfg.get("model_name"),
+            )
+            query_enhancer = QueryEnhancer(translator=translator, docs_lang=docs_lang)
+        elif mode == "llm":
+            llm_cfg = enhancer_cfg["llm"]
+            enhancer_llm = LlmApi(
+                api_key=llm_cfg["api_key"],
+                base_url=llm_cfg["api_base_url"],
+                model=llm_cfg["model"],
+                temperature=llm_cfg.get("temperature", 0.0),
+                thinking_mode=llm_cfg.get("thinking_mode", False),
+            )
+            query_enhancer = QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
+        else:
+            enhancer_llm = LlmApi(
+                api_key=enhancer_cfg["api_key"],
+                base_url=enhancer_cfg["api_base_url"],
+                model=enhancer_cfg["model"],
+                temperature=enhancer_cfg.get("temperature", 0.0),
+                thinking_mode=enhancer_cfg.get("thinking_mode", False),
+            )
+            query_enhancer = QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
+
         print(
             f"\r\033[K>> Initializing query enhancer... done  "
             f"[{time.perf_counter() - t0:.1f}s]"
@@ -207,7 +235,7 @@ def _init_ask_chat(config: dict):
 def cmd_ask(config: dict, question: str) -> None:
     store, llm, query_enhancer, system_prompt = _init_ask_chat(config)
 
-    chunks, messages, rewritten_question = _retrieve_context(
+    chunks, messages, rewritten_question, enhance_label = _retrieve_context(
         store,
         llm,
         question,
@@ -225,7 +253,9 @@ def cmd_ask(config: dict, question: str) -> None:
     print()
 
     out_dir = _init_output_dir(question)
-    _export_round(out_dir, 1, question, chunks, answer, rewritten_question)
+    _export_round(
+        out_dir, 1, question, chunks, answer, rewritten_question, enhance_label
+    )
     print(f"\nSaved to {out_dir}")
 
 
@@ -300,7 +330,7 @@ def cmd_chat(config: dict) -> None:
         if question in ("/exit", "/quit", "/q"):
             break
 
-        chunks, messages, rewritten_question = _retrieve_context(
+        chunks, messages, rewritten_question, enhance_label = _retrieve_context(
             store,
             llm,
             question,
@@ -325,7 +355,13 @@ def cmd_chat(config: dict) -> None:
             out_dir = _init_output_dir(question)
         round_index += 1
         _export_round(
-            out_dir, round_index, question, chunks, answer, rewritten_question
+            out_dir,
+            round_index,
+            question,
+            chunks,
+            answer,
+            rewritten_question,
+            enhance_label,
         )
 
 

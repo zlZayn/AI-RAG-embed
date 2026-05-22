@@ -13,7 +13,7 @@ Local RAG system with two phases:
 
 ### Query Phase
 
-1. (Optional) Enhance user question: translate and rephrase (with conversation history if available) to improve retrieval
+1. (Optional) Enhance user question: translate to `docs_lang` to improve retrieval. In LLM mode, also rephrase and resolve conversation references
 2. Convert enhanced question to vector embedding
 3. Retrieve top-k most similar chunks from the vector database
 4. Send **original** question + retrieved chunks to a remote LLM as context (enhanced question is retrieval-only, preserving the user's language for the answer)
@@ -34,7 +34,8 @@ lib/
 ├── embed_engine.py     # SentenceTransformer wrapper
 ├── vector_db.py       # Chroma PersistentClient operations
 ├── llm_api.py         # openai.OpenAI wrapper
-└── query_enhancer.py  # query enhancement (question translation + rewording)
+├── query_enhancer.py  # query enhancement (translation + rewording)
+└── local_translator.py # MarianMT local translation backend
 ```
 
 ## Configuration
@@ -51,7 +52,7 @@ lib/
 | `chroma_persist_dir` | Embedding | Chroma persistence directory |
 | `retrieval_k` | Embedding | Number of chunks to retrieve (default: 3) |
 | `query_enhance_enabled` | Enhancement | Enable query enhancement |
-| `enhancer` | Enhancement | Enhancer model config (api_base_url, api_key, model, temperature, thinking_mode) |
+| `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (API) or `"local"` (MarianMT) |
 | `llm` | LLM | LLM model config (api_base_url, api_key, model, temperature, thinking_mode) |
 | `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge |
 | `system_rules` | Behavior | Additional system prompt rules (optional) |
@@ -114,9 +115,10 @@ _retrieve_context(store, llm, question, system_prompt, retrieval_k, query_enhanc
   ├─► print ">> Processing..."
 
   ├─► [optional] query_enhancer.enhance(question, messages_history)
-  │     └─► enhancer llm: translate + rephrase question to docs_lang
-  │           With history: resolves pronouns/ellipsis using conversation context
-  │           Without history: standalone translation only
+  │     ├─ LLM mode:
+  │     │    With history: rewrite as standalone query (resolve pronouns/ellipsis), then translate to docs_lang
+  │     │    Without history: translate to docs_lang, replace technical terms with target-language equivalents
+  │     └─ Local mode: translate to docs_lang via MarianMT (no rewrite, no term replacement)
 
   ├─► print ">> Retrieving..."
   ├─► store.query(rewritten_question, k)
@@ -130,10 +132,10 @@ _retrieve_context(store, llm, question, system_prompt, retrieval_k, query_enhanc
   └─► llm.generate_stream(messages)
         POST {base_url}/chat/completions (stream=True)
         messages: [system prompt, (conversation history ...), {user:
-          "Context:\n{chunks}\n\nQuestion: {question}"}]
+          "Context:\n{chunks}\n\nQuestion: {original_question}"}]
 
-The enhanced question is used **only for retrieval**.
-The LLM always receives the **original question** to preserve the user's language.
+Note: the enhanced question is used **only for retrieval** (store.query).
+The answer LLM always receives the **original question** to preserve the user's language.
 ```
 
 If no relevant chunks are found, the system prints a message and skips the round.
@@ -181,7 +183,7 @@ VectorDb(persist_dir, embed_engine)
 
 ```text
 LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
-  .generate(messages) -> str          # non-streaming (used by query_enhancer)
+  .generate(messages) -> str          # non-streaming (used by query_enhancer, LLM mode only)
   .generate_stream(messages) -> iter  # streaming (used by rag_runner)
 ```
 
@@ -192,16 +194,37 @@ LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
 ### lib/query_enhancer.py
 
 ```text
-QueryEnhancer(llm_api, docs_lang="en")
+QueryEnhancer(llm_api=None, docs_lang="en", translator=None)
   .enhance(question, history=None) -> str
+  .label -> str          # "Enhanced Question" (LLM) or "Translated Question" (local)
 ```
 
-Two modes:
+Two backends, selected by which constructor argument is provided:
 
-- **With conversation history**: Rewrites the question as a standalone query by resolving pronouns and ellipsis using the conversation context, then translates to `docs_lang`. Used in interactive mode (`cmd_chat`) for follow-up questions like "what does that mean".
-- **Without history** (single question in `cmd_ask`): Translates and rephrases the question into `docs_lang`, replacing technical terms with their equivalents.
+**LLM mode** (`llm_api` provided):
 
-Returns the rewritten question as a single string. Used **only for retrieval** — the original question is sent to the answer LLM to preserve the user's language.
+- With conversation history (`cmd_chat` follow-up questions): Constructs a prompt containing the full conversation, asks the LLM to rewrite the latest question as a standalone query (resolving pronouns and ellipsis), then translates to `docs_lang`.
+- Without history (`cmd_ask` single question): Constructs a translation prompt with term-replacement instructions. The LLM translates the question to `docs_lang` and replaces technical terms with their target-language equivalents.
+
+**Local mode** (`translator` provided):
+
+- Calls `translator.translate(question)` directly. Pure translation via MarianMT — no term replacement, no conversation-context rewrite. History parameter is accepted but ignored.
+
+Returns the result as a single string. Used **only for retrieval** — the answer LLM always receives the original question to preserve the user's language.
+
+### lib/local_translator.py
+
+```text
+LocalTranslator(src_lang, docs_lang, model_name=None)
+  .translate(text) -> str
+```
+
+- Loads a Helsinki-NLP MarianMT model via `transformers.MarianMTModel` and `MarianTokenizer`.
+- Model loaded with `use_safetensors=True` to avoid `torch.load` security restriction (CVE-2025-32434) — works with any torch version.
+- `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{src_lang}-{docs_lang}` (e.g., `src_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`).
+- Class-level cache (`_cache` dict): keyed by model name. Same language pair shares one loaded model across all instances within the process.
+- First load downloads from HuggingFace (approx. 300 MB). Subsequent loads read from the local HuggingFace cache (`~/.cache/huggingface/`).
+- `translate()`: tokenizes input, runs `model.generate()`, decodes output tokens. Returns the translated string.
 
 ## Output Export
 
@@ -223,10 +246,10 @@ Each round file:
 {original question}
 ```
 
-**Enhanced Question:**
+**Enhanced Question:** (LLM mode) / **Translated Question:** (local mode)
 
 ```text
-{translated and reworded question}
+{processed question}
 ```
 
 **Answer:**
@@ -280,7 +303,7 @@ pip install "sentence-transformers>=3.0,<5.0"
 
 ### HuggingFace Mirror (China)
 
-`embed_engine.py` sets `HF_ENDPOINT=https://hf-mirror.com` automatically. Override if needed:
+`embed_engine.py` and `local_translator.py` both set `HF_ENDPOINT=https://hf-mirror.com` automatically via `os.environ.setdefault`. Override if needed:
 
 ```bash
 set HF_ENDPOINT=https://hf-mirror.com    # Windows

@@ -1,12 +1,22 @@
-from lib.llm_api import LlmApi
-
-
 class QueryEnhancer:
-    def __init__(self, llm_api: LlmApi, docs_lang: str = "en"):
+    def __init__(self, llm_api=None, docs_lang: str = "en", translator=None):
         self._llm = llm_api
+        self._translator = translator
         self._docs_lang = docs_lang
 
+    @property
+    def label(self) -> str:
+        if self._translator:
+            return "Translated Question"
+        return "Enhanced Question"
+
     def enhance(self, question: str, history: list | None = None) -> str:
+        if self._translator:
+            return self._translator.translate(question)
+
+        if not self._llm:
+            return question
+
         prompt = self._build_prompt(question, history)
         messages = [{"role": "user", "content": prompt}]
         try:

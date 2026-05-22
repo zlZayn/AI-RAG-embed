@@ -8,11 +8,18 @@
     "chroma_persist_dir": "./chroma_db",
     "query_enhance_enabled": true,
     "enhancer": {
-        "api_base_url": "https://api.deepseek.com",
-        "api_key": "sk-your-api-key-here",
-        "model": "deepseek-v4-flash",
-        "temperature": 0.0,
-        "thinking_mode": false
+        "mode": "llm",
+        "local": {
+            "src_lang": "zh",
+            "model_name": "Helsinki-NLP/opus-mt-zh-en"
+        },
+        "llm": {
+            "api_base_url": "https://api.deepseek.com",
+            "api_key": "sk-your-api-key-here",
+            "model": "deepseek-v4-flash",
+            "temperature": 0.0,
+            "thinking_mode": false
+        }
     },
     "llm": {
         "api_base_url": "https://api.deepseek.com",
