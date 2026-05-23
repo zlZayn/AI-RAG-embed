@@ -226,4 +226,4 @@ Without GPU, everything still works, but **much slower**.
 
 ---
 
-See `ARCHITECTURE.md` for build/query workflow, module internals, and environment setup (`sentence-transformers` version).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for build/query workflow, module internals, and environment setup (`sentence-transformers` version).

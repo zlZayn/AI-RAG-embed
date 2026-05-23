@@ -226,4 +226,4 @@ lib/
 
 ---
 
-详见 `ARCHITECTURE.md` 了解构建/查询工作流、模块内部实现和环境配置（`sentence-transformers` 版本）。
+详见 [ARCHITECTURE.md](ARCHITECTURE.md) 了解构建/查询工作流、模块内部实现和环境配置（`sentence-transformers` 版本）。
