@@ -1,5 +1,7 @@
 # AI-RAG-embed
 
+[English](README.md) | [简体中文](README_zh.md)
+
 ## Overview
 
 Drop your .txt/.md files into `documents/`, embed them locally to build the index, then ask questions and get answers from a remote LLM based on your content.
