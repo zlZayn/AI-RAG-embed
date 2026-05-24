@@ -4,7 +4,7 @@
 
 ## Overview
 
-Drop your .txt/.md files into `documents/`, embed them locally to build the index, then ask questions and get answers from a remote LLM based on your content.
+Drop your `.txt`/`.md` files into `documents/`, embed them locally to build the index, then ask questions and get answers from a remote LLM based on your content.
 
 ## Quick Start
 
@@ -34,7 +34,7 @@ python rag_qa.py --build    # incremental: skip if no files changed
 python rag_qa.py --rebuild  # force full re-embed
 ```
 
-`--build` only detects file content changes. If you change `chunk_size`, `chunk_overlap`, or `embedding_model_name` in `config.json`, use `--rebuild` to re-embed everything.
+`--build` only detects file content changes. If you change `chunking` or `embedding_model_name` in `config.json`, use `--rebuild` to re-embed everything.
 
 ### Interactive Mode
 
@@ -70,7 +70,7 @@ Retrieve relevant document chunks without generating an answer.
 python rag_qa.py --search "What is exponential smoothing?"
 
 # With query enhancement (retrieval-optimized rewriting before searching)
-python rag_qa.py --search --enhance "什么是指数平滑？"
+python rag_qa.py --search --enhance "What is exponential smoothing?"
 ```
 
 Returns the top `retrieval_k` chunks (default: 3) directly to stdout. With `--enhance`, the query is processed through the enhancer before retrieval, same as `cmd_ask`. See [Query Enhancement](#query-enhancement-enhancer) for mode differences.
@@ -105,23 +105,39 @@ Edit `config.json` to configure the system. Relative paths (`./`) are resolved a
 | --- | --- |
 | `docs_dir` | Folder containing your `.txt` / `.md` files (including subfolders). Use `.doc_loader_ignore` to exclude files (`.gitignore` syntax). |
 | `docs_lang` | Language of your documents (e.g., `"en"`, `"zh"`). The enhancer generates output in this language for retrieval. |
-| `chunk_size` | Target characters per chunk. Larger = more context, less precise retrieval. Typical range: 300-1000. |
-| `chunk_overlap` | Overlapping characters between adjacent chunks. Recommended: 10-20% of `chunk_size`. |
+| `chunking` | Chunking config object. Mode-specific keys are listed below. |
 | `embedding_model_name` | HuggingFace model ID for vector embeddings. See notes below. |
 | `chroma_persist_dir` | Folder where the vector database is saved. |
+
+### Chunking (`chunking`)
+
+Controls how documents are split into chunks for embedding.
+
+| Key | Description |
+| --- | --- |
+| `mode` | `"auto"` (default) = smart splitting. `"fixed"` = fixed-length with separator fallback. |
+
+**Auto mode** (`chunking.auto`): Heading-aware for `.md` files, paragraph-first for `.txt` files. Code blocks and tables are never split.
+
+| Key | Description |
+| --- | --- |
+| `target_chars` | Target chunk size. Atomic units (code blocks, tables) may exceed this. Default: `700`. |
+| `split_at_level` | Heading level to split at (1-6). `2` = split at `#` and `##`. Default: `3`. |
+| `min_chars` | Minimum characters per chunk. Shorter sections are dropped. Default: `100`. |
+| `include_heading` | Prepend section heading to each chunk (as `> heading`). Default: `false`. |
+
+**Fixed mode** (`chunking.fixed`): Splits at `max_chars` (hard ceiling), falling back to the best separator by priority (`\n\n` > `\n` > punctuation > space).
+
+| Key | Description |
+| --- | --- |
+| `max_chars` | Hard limit per chunk. Never exceeded. Default: `700`. |
+| `overlap_chars` | Overlap between adjacent chunks. Default: `70`. |
 
 > **Switching models**: The code has model-specific defaults that may need manual adjustment:
 >
 > - **Embedding model**: A query prefix is hardcoded for the mxbai model family. Other models (e.g., `all-MiniLM-L6-v2`) do not use it — leaving it in will hurt retrieval. Check `lib/embed_engine.py` `_QUERY_PREFIX`.
 > - **Translation model**: The local enhancer auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`. To use a different model series, set `model_name` explicitly in `config.json`.
 > - **HuggingFace mirror**: `hf-mirror.com` is set as the default endpoint for users in China. Remove or override `HF_ENDPOINT` if you have direct access to HuggingFace.
-
-### Retrieval
-
-| Key | Description |
-| --- | --- |
-| `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
-| `retrieval_distance_threshold` | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in the enhancer config when enhancement is enabled. Set `null` to disable filtering. Default: `0.3`. |
 
 ### Query Enhancement (`enhancer`)
 
@@ -148,6 +164,23 @@ Rewrites your question before searching to improve retrieval quality. The enhanc
 | `query_lang` | Language you ask questions in (e.g., `"zh"`, `"en"`). |
 | `model_name` | HuggingFace model ID (optional). Auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` if omitted. |
 | `distance_threshold` | Cosine distance threshold for this mode. Default: `0.3`. |
+
+### Retrieval & Reranking
+
+| Key | Description |
+| --- | --- |
+| `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
+| `retrieval_distance_threshold` | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in the enhancer config when enhancement is enabled. Set `null` to disable filtering. Default: `0.3`. |
+
+**Reranker** (optional): Two-stage retrieval — vector search retrieves `retrieval_k * 4` candidates, then a cross-encoder reranks by relevance and trims to the final `retrieval_k`. Improves precision where bi-encoder cosine similarity is insufficient.
+
+| Key | Description |
+| --- | --- |
+| `reranker_enabled` | Enable cross-encoder reranker. Default: `false`. |
+| `reranker.model_name` | Cross-encoder model ID. Default: `"BAAI/bge-reranker-v2-m3"`. |
+| `reranker.top_k` | Number of chunks after reranking. Default: `null` (uses `retrieval_k`). |
+
+> **Performance**: Reranking adds ~100-300ms on GPU, ~500-1000ms on CPU. First load downloads the model (~1.1GB); subsequent loads use local cache.
 
 ### Answer Generation (`llm`)
 
@@ -200,7 +233,8 @@ lib/
 ├── vector_db.py        # Chroma vector store operations
 ├── llm_api.py          # remote LLM API client (OpenAI-compatible)
 ├── query_enhancer.py   # query enhancement (retrieval-optimized rewriting)
-└── local_translator.py # MarianMT local translation backend
+├── local_translator.py # MarianMT local translation backend
+└── reranker.py         # cross-encoder reranker for precision re-ranking
 ```
 
 ## Requirements

@@ -142,6 +142,8 @@ def _retrieve_context(
     retrieval_distance_threshold=None,
     query_enhancer=None,
     messages_history=None,
+    reranker=None,
+    reranker_top_k=None,
 ) -> RetrieveResult:
     """检索相关文档块。"""
     rewritten_question = question
@@ -153,15 +155,24 @@ def _retrieve_context(
         rewritten_question = query_enhancer.enhance(question, messages_history)
         enhance_label = query_enhancer.label
 
+    # Retrieve more candidates when reranker will refine
+    k_for_search = retrieval_k * 4 if reranker else retrieval_k
+
     print("\r\033[K>> Retrieving... ", end="", flush=True)
     chunks = store.query(
         rewritten_question,
-        k=retrieval_k,
+        k=k_for_search,
         distance_threshold=retrieval_distance_threshold,
     )
     if not chunks:
         print("\r\033[K>> No relevant chunks found. Skipping.\n")
         return RetrieveResult([], None, rewritten_question, enhance_label)
+
+    # Rerank and trim to final retrieval_k
+    if reranker:
+        print(f"\r\033[K>> Reranking {len(chunks)} chunks... ", end="", flush=True)
+        top_k = reranker_top_k or retrieval_k
+        chunks = reranker.rerank(rewritten_question, chunks, top_k=top_k)
 
     print(f"\r\033[K>> Retrieved {len(chunks)} chunks. Generating...")
 
@@ -192,12 +203,13 @@ def _init_ask_chat(config: dict):
         )
 
     query_enhancer, enhancer_threshold = _init_enhancer(config)
+    reranker = _init_reranker(config)
 
     system_prompt = _build_system_prompt(
         config.get("system_rules", ""), config.get("strict_context", False)
     )
 
-    return store, llm, query_enhancer, system_prompt, enhancer_threshold
+    return store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker
 
 
 def _init_enhancer(config: dict):
@@ -243,11 +255,23 @@ def _init_enhancer(config: dict):
             )
 
 
+def _init_reranker(config: dict):
+    """Initialize cross-encoder reranker from config. Returns Reranker or None."""
+    if not config.get("reranker_enabled", False):
+        return None
+    from lib.reranker import Reranker
+
+    cfg = config.get("reranker", {})
+    with _timed("Loading reranker model"):
+        return Reranker(model_name=cfg.get("model_name", "BAAI/bge-reranker-v2-m3"))
+
+
 def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
     """Search only: retrieve document chunks without LLM generation."""
     store, _ = _init_embed_store(config)
 
     distance_threshold = config.get("retrieval_distance_threshold")
+    enhancer_threshold = None
 
     if use_enhancer:
         enhancer, enhancer_threshold = _init_enhancer(config)
@@ -257,12 +281,23 @@ def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
             if enhancer_threshold is not None and not config.get("_cli_threshold"):
                 distance_threshold = enhancer_threshold
 
-    k = config.get("retrieval_k", 3)
-    chunks = store.query(question, k=k, distance_threshold=distance_threshold)
+    reranker = _init_reranker(config)
+
+    retrieval_k = config.get("retrieval_k", 3)
+    k_for_search = retrieval_k * 4 if reranker else retrieval_k
+    chunks = store.query(
+        question, k=k_for_search, distance_threshold=distance_threshold
+    )
 
     if not chunks:
         print(">> No relevant chunks found.")
         return
+
+    if reranker:
+        print(f">> Reranking {len(chunks)} chunks... ", end="", flush=True)
+        top_k = config.get("reranker", {}).get("top_k") or retrieval_k
+        chunks = reranker.rerank(question, chunks, top_k=top_k)
+        print("done")
 
     enc = sys.stdout.encoding or "utf-8"
     for i, chunk in enumerate(chunks, 1):
@@ -280,8 +315,8 @@ def _stream_answer(llm, messages: list[dict]) -> str:
 
 
 def cmd_ask(config: dict, question: str) -> None:
-    store, llm, query_enhancer, system_prompt, enhancer_threshold = _init_ask_chat(
-        config
+    store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker = (
+        _init_ask_chat(config)
     )
 
     distance_threshold = (
@@ -298,6 +333,8 @@ def cmd_ask(config: dict, question: str) -> None:
         retrieval_k=config.get("retrieval_k", 3),
         retrieval_distance_threshold=distance_threshold,
         query_enhancer=query_enhancer,
+        reranker=reranker,
+        reranker_top_k=config.get("reranker", {}).get("top_k"),
     )
     if not chunks:
         return
@@ -333,11 +370,7 @@ def cmd_build(config: dict, force: bool = False) -> None:
         sys.exit(1)
 
     with _timed("Loading and chunking documents"):
-        chunks, file_hashes = load_documents(
-            docs_dir,
-            chunk_size=config["chunk_size"],
-            chunk_overlap=config["chunk_overlap"],
-        )
+        chunks, file_hashes = load_documents(docs_dir, config)
     if not chunks:
         print(">> No .txt or .md files found in documents directory.")
         sys.exit(1)
@@ -360,8 +393,8 @@ def cmd_build(config: dict, force: bool = False) -> None:
 
 
 def cmd_chat(config: dict) -> None:
-    store, llm, query_enhancer, system_prompt, enhancer_threshold = _init_ask_chat(
-        config
+    store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker = (
+        _init_ask_chat(config)
     )
 
     distance_threshold = (
@@ -400,6 +433,8 @@ def cmd_chat(config: dict) -> None:
             retrieval_distance_threshold=distance_threshold,
             query_enhancer=query_enhancer,
             messages_history=recent_history,
+            reranker=reranker,
+            reranker_top_k=config.get("reranker", {}).get("top_k"),
         )
         if not chunks:
             continue

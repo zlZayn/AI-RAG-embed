@@ -23,8 +23,9 @@ Local RAG system with two phases:
 1. (Optional) Enhance user question for retrieval. In LLM mode, generate a retrieval-optimized paragraph in `docs_lang`. In local mode, translate to `docs_lang`. For follow-up questions, rewrite using conversation history first
 2. Convert enhanced question to vector embedding
 3. Retrieve top-k most similar chunks from the vector database
-4. Send **original** question + retrieved chunks to a remote LLM as context (enhanced question is retrieval-only, preserving the user's language for the answer)
-5. Generate answer and save to `output/` directory
+4. (Optional) Rerank retrieved chunks with a cross-encoder model for precision re-ranking. Retrieves `retrieval_k * 4` candidates from vector search, then reranks and trims to `retrieval_k`
+5. Send **original** question + retrieved chunks to a remote LLM as context (enhanced question is retrieval-only, preserving the user's language for the answer)
+6. Generate answer and save to `output/` directory
 
 ## Directory Structure
 
@@ -42,7 +43,8 @@ lib/
 ├── vector_db.py       # Chroma PersistentClient + incremental rebuild via file hash diff
 ├── llm_api.py         # openai.OpenAI wrapper
 ├── query_enhancer.py  # query enhancement (retrieval-optimized rewriting)
-└── local_translator.py # MarianMT local translation backend
+├── local_translator.py # MarianMT local translation backend
+└── reranker.py        # cross-encoder reranker for precision re-ranking
 ```
 
 ## Configuration
@@ -53,14 +55,15 @@ lib/
 | --- | --- | --- |
 | `docs_dir` | Indexing | Source document directory |
 | `docs_lang` | Indexing | Target language for enhancer output |
-| `chunk_size` | Indexing | Target characters per chunk (splits at natural boundaries) |
-| `chunk_overlap` | Indexing | Overlapping characters between adjacent chunks |
+| `chunking` | Indexing | Chunking config: `mode` (`"auto"` / `"fixed"`), plus mode-specific sub-keys (`auto.target_chars`, `fixed.max_chars`). See `config_example.json`. |
 | `embedding_model_name` | Indexing | HuggingFace model ID |
 | `chroma_persist_dir` | Indexing | Chroma persistence directory |
-| `retrieval_k` | Retrieval | Number of chunks to retrieve (Default: `3`) |
-| `retrieval_distance_threshold` | Retrieval | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in enhancer config when enhancement is enabled. `null` disables filtering (Default: `0.3`) |
 | `query_enhance_enabled` | Enhancement | Enable query enhancement (Default: `false`) |
 | `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (retrieval-optimized paragraph) or `"local"` (MarianMT translation). Each mode has its own `distance_threshold`. |
+| `retrieval_k` | Retrieval | Number of chunks to retrieve (Default: `3`) |
+| `retrieval_distance_threshold` | Retrieval | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in enhancer config when enhancement is enabled. `null` disables filtering (Default: `0.3`) |
+| `reranker_enabled` | Retrieval | Enable cross-encoder reranker for precision re-ranking (Default: `false`) |
+| `reranker` | Retrieval | Reranker config: `model_name` (Default: `"BAAI/bge-reranker-v2-m3"`), `top_k` (Default: `null`, uses `retrieval_k`) |
 | `llm` | Generation | LLM model config (api_base_url, api_key, model, temperature (Default: `0.3`), thinking_mode) |
 | `max_history_rounds` | Behavior | Recent conversation rounds to keep (Default: `10`) |
 | `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (Default: `false`) |
@@ -83,7 +86,7 @@ python rag_qa.py --rebuild             →  cmd_build(force=True)  (full rebuild
 
 Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`. These override the corresponding `config.json` fields; if omitted, config values (or code defaults) are used. CLI override takes highest priority, even over per-mode enhancer thresholds.
 
-Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunk_size`, `chunk_overlap`, `embedding_model_name`) are intentionally excluded: changing them requires a full `--rebuild`, which is a deliberate operation that should not be triggered accidentally by a CLI flag.
+Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing them requires a full `--rebuild`, which is a deliberate operation that should not be triggered accidentally by a CLI flag.
 
 Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_embed_store()`. `cmd_search` and `cmd_build` call `_init_embed_store()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` first checks for file changes using only stdlib `json`; `_import_lib()` is called only when changes are detected. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
 
@@ -93,11 +96,11 @@ Progress messages use the `_timed(label)` context manager for consistent `">> {l
 
 ```text
 cmd_build()
-├─► doc_loader.load_documents(docs_dir, chunk_size, chunk_overlap)
+├─► doc_loader.load_documents(docs_dir, config)
 │   ├─ pre-scan: walk tree, collect .doc_loader_ignore specs
 │   ├─ os.walk: collect .txt/.md files, skip ignored
 │   ├─ read UTF-8 content, compute MD5 hash per file
-│   └─ smart split: paragraph > sentence > word > hard cut
+│   └─ smart split: auto mode (md: heading-aware; txt: paragraph-first) or fixed mode (separator-priority fallback)
 │       returns (chunks, file_hashes)
 │       chunks: [{"text": str, "source": "relative/path"}, ...]
 │       file_hashes: {"relative/path": "md5hex", ...}
@@ -121,7 +124,7 @@ cmd_build()
 
 `--rebuild` skips change detection and forces a full delete-then-add cycle. `--build` reads `build_meta.json` via stdlib `json` only — no `sentence-transformers`, `chromadb`, or `openai` imported when no files changed.
 
-Change detection compares file content hashes only. Config changes to `chunk_size`, `chunk_overlap`, or `embedding_model_name` are not detected — use `--rebuild` after changing these.
+Change detection compares file content hashes only. Config changes to `chunking` or `embedding_model_name` are not detected — use `--rebuild` after changing these.
 
 `rebuild()` performs incremental updates by comparing file content hashes stored in `build_meta.json`. Only changed, added, or removed files are re-embedded. `rebuild_full()` does a full delete-then-add cycle for when a clean rebuild is needed.
 
@@ -139,12 +142,15 @@ cmd_search(question, use_enhancer=True)
 ├─► _init_enhancer(config)             →  enhancer
 ├─► enhancer.enhance(question)         →  rewritten_question
 │   (same logic as _retrieve_context: LLM retrieval-paragraph, or local MarianMT)
-├─► store.query(rewritten_question, k, distance_threshold)
+├─► _init_reranker(config)             →  reranker
+├─► store.query(rewritten_question, k_for_search, distance_threshold)
+│   k_for_search = retrieval_k * 4  (if reranker enabled, else retrieval_k)
+├─► [optional] reranker.rerank(rewritten_question, chunks, top_k=retrieval_k)
 └─► print chunks to stdout
 ```
 
 ```text
-_retrieve_context(..., retrieval_distance_threshold=None) -> RetrieveResult(chunks, messages, rewritten_question, enhance_label)
+_retrieve_context(..., retrieval_distance_threshold=None, reranker=None) -> RetrieveResult(chunks, messages, rewritten_question, enhance_label)
 ├─► print ">> Processing..."
 │
 ├─► [optional] query_enhancer.enhance(question, messages_history)
@@ -154,14 +160,20 @@ _retrieve_context(..., retrieval_distance_threshold=None) -> RetrieveResult(chun
 │   └─ Local mode: translate to docs_lang via MarianMT (no rewrite, no term replacement)
 │
 ├─► print ">> Retrieving..."
-├─► store.query(rewritten_question, k, distance_threshold)
+├─► k_for_search = retrieval_k * 4  (if reranker enabled, else retrieval_k)
+├─► store.query(rewritten_question, k_for_search, distance_threshold)
 │   ├─ embed_engine.get_embedding(rewritten_question)  →  vector
-│   ├─ collection.query(query_embeddings, n_results=k)
+│   ├─ collection.query(query_embeddings, n_results=k_for_search)
 │   │   Chroma cosine similarity search
-│   │   returns top-k document chunks
+│   │   returns top-k_for_search document chunks
 │   └─ filter by distance_threshold (if set)
 │       discard chunks with distance >= threshold
 │       if none pass, return top-1 as fallback
+│
+├─► [optional] reranker.rerank(rewritten_question, chunks, top_k=retrieval_k)
+│   ├─ CrossEncoder.predict([(query, chunk) ...])  →  scores
+│   ├─ sort by score descending
+│   └─ return top retrieval_k chunks
 │
 ├─► print ">> Retrieved N chunks. Generating..."
 │
@@ -247,16 +259,29 @@ Each round file:
 ### lib/doc_loader.py
 
 ```text
-load_documents(docs_dir, chunk_size, chunk_overlap) -> (list[dict], dict[str, str])
+load_documents(docs_dir, config) -> (list[dict], dict[str, str])
 ```
 
 - Walks directory tree with `os.walk`.
 - Pre-scans for `.doc_loader_ignore` files (`.gitignore` syntax via `pathspec`).
-- Smart chunk splitting: searches backward from `chunk_size` for the best natural boundary. Priority order: paragraph (`\n\n`) > newline (`\n`) > sentence-ending punctuation (`。！？.!？`) > space > hard cut. Minimum boundary = `chunk_size // 2`.
 - Each chunk carries its source file path relative to `docs_dir`.
 - Computes MD5 hash per file for incremental rebuild detection.
 - Skips empty files.
-- Returns `(chunks, file_hashes)` tuple.
+- Two chunking modes controlled by `chunking.mode`:
+
+**auto mode** (default, `chunking.auto`):
+
+- `.md` files: parses Markdown into structural units (headings, paragraphs, code blocks, tables), groups by heading level (`split_at_level`), then merges within sections. Code blocks and tables are atomic — never split even if they exceed `target_chars`.
+- `.txt` files: splits on paragraph boundaries (`\n\n`, falls back to `\n`). Paragraphs are never cut — a paragraph either fits into the current chunk or starts a new one.
+- `target_chars`: target chunk size. Atomic units (code blocks, tables) may exceed this. Default: `700`.
+- `min_chars`: sections shorter than this are dropped as noise.
+- `include_heading`: if `true`, prepends the section heading (`> heading`) to each chunk.
+
+**fixed mode** (`chunking.fixed`):
+
+- Splits at `max_chars` (hard ceiling, never exceeded), then searches backward for the best separator by priority: paragraph break (`\n\n`) > newline (`\n`) > sentence-ending punctuation (`。！？.!？`) > space > hard cut. Minimum boundary = `max_chars // 2`.
+- `max_chars`: hard limit per chunk. Default: `700`.
+- `overlap_chars`: adjacent chunks overlap by this many characters to preserve context.
 
 ### lib/embed_engine.py
 
@@ -335,6 +360,20 @@ LocalTranslator(query_lang, docs_lang, model_name=None)
 - Class-level cache (`_cache` dict): keyed by model name. Same language pair shares one loaded model across all instances within the process.
 - First load downloads from HuggingFace (approx. 300 MB). Subsequent loads read from the local HuggingFace cache (`~/.cache/huggingface/`).
 - `translate()`: tokenizes input, runs `model.generate()`, decodes output tokens. Returns the translated string.
+
+### lib/reranker.py
+
+```text
+Reranker(model_name="BAAI/bge-reranker-v2-m3")
+  .rerank(query, chunks, top_k) -> list[str]
+```
+
+- Wraps `sentence_transformers.CrossEncoder` for precision re-ranking of retrieved chunks.
+- Two-stage retrieval: vector search (bi-encoder) retrieves `k * 4` candidates, cross-encoder reranks and trims to final `top_k`.
+- Cross-encoder encodes (query, chunk) pairs jointly with full attention interaction, yielding higher precision than bi-encoder cosine similarity alone.
+- Model loaded with `max_length=512`. First load downloads from HuggingFace; subsequent loads use local cache.
+- `rerank()`: scores each (query, chunk) pair, sorts by score descending, returns top_k chunks.
+- Initialized by `_init_reranker(config)` when `reranker_enabled` is `true`. Used by `_retrieve_context()` and `cmd_search()`.
 
 ## Environment Setup
 

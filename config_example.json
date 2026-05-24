@@ -1,12 +1,21 @@
 {
     "docs_dir": "./documents",
     "docs_lang": "en",
-    "chunk_size": 700,
-    "chunk_overlap": 70,
+    "chunking": {
+        "mode": "auto",
+        "auto": {
+            "target_chars": 700,
+            "split_at_level": 3,
+            "min_chars": 100,
+            "include_heading": false
+        },
+        "fixed": {
+            "max_chars": 700,
+            "overlap_chars": 70
+        }
+    },
     "embedding_model_name": "mixedbread-ai/mxbai-embed-large-v1",
     "chroma_persist_dir": "./chroma_db",
-    "retrieval_k": 5,
-    "retrieval_distance_threshold": 0.3,
     "query_enhance_enabled": true,
     "enhancer": {
         "mode": "llm",
@@ -23,6 +32,13 @@
             "thinking_mode": false,
             "distance_threshold": 0.2
         }
+    },
+    "retrieval_k": 3,
+    "retrieval_distance_threshold": 0.3,
+    "reranker_enabled": false,
+    "reranker": {
+        "model_name": "BAAI/bge-reranker-v2-m3",
+        "top_k": null
     },
     "llm": {
         "api_base_url": "https://api.deepseek.com",

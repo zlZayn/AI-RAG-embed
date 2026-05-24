@@ -4,7 +4,7 @@
 
 ## 概述
 
-将 `.txt/.md` 文件放入 `documents/` 目录，本地构建向量索引，然后基于你的文档内容向远程 LLM 提问获取答案。
+将 `.txt`/`.md` 文件放入 `documents/` 目录，本地构建向量索引，然后基于你的文档内容向远程 LLM 提问获取答案。
 
 ## 快速开始
 
@@ -34,7 +34,7 @@ python rag_qa.py --build    # 增量构建：无文件变更时跳过
 python rag_qa.py --rebuild  # 强制重新嵌入
 ```
 
-`--build` 仅检测文件内容变更。如果修改了 `config.json` 中的 `chunk_size`、`chunk_overlap` 或 `embedding_model_name`，需要使用 `--rebuild` 重新嵌入所有内容。
+`--build` 仅检测文件内容变更。如果修改了 `config.json` 中的 `chunking` 或 `embedding_model_name`，需要使用 `--rebuild` 重新嵌入所有内容。
 
 ### 交互模式
 
@@ -73,7 +73,7 @@ python rag_qa.py --search "什么是指数平滑？"
 python rag_qa.py --search --enhance "什么是指数平滑？"
 ```
 
-返回排名前 `retrieval_k` 个片段（默认 3 个）直接输出到标准输出。使用 `--enhance` 时，查询会先经过增强器处理再进行检索，与 `cmd_ask` 相同。参见[查询增强](#查询增强-enhancer)了解模式差异。
+返回排名前 `retrieval_k` 个片段（默认 3 个）直接输出到标准输出。使用 `--enhance` 时，查询会先经过增强器处理再进行检索，逻辑与问答模式相同。参见[查询增强](#查询增强enhancer)了解模式差异。
 
 ### 命令行覆盖
 
@@ -105,23 +105,39 @@ python rag_qa.py --search --enhance --retrieval_k 3 --retrieval_distance_thresho
 | --- | --- |
 | `docs_dir` | 存放 `.txt` / `.md` 文件的目录（含子目录）。使用 `.doc_loader_ignore` 排除文件（`.gitignore` 语法）。 |
 | `docs_lang` | 文档语言（如 `"en"`、`"zh"`）。增强器会生成此语言的输出用于检索。 |
-| `chunk_size` | 每个片段的目标字符数。越大上下文越多，但检索精度越低。典型范围：300-1000。 |
-| `chunk_overlap` | 相邻片段的重叠字符数。建议值：`chunk_size` 的 10-20%。 |
+| `chunking` | 分块配置对象，包含 `mode` 及模式专属子项，详见下方。 |
 | `embedding_model_name` | HuggingFace 模型 ID，用于向量嵌入。详见下方说明。 |
 | `chroma_persist_dir` | 向量数据库的保存目录。 |
+
+### 分块配置（`chunking`）
+
+控制文档如何切分为片段以进行嵌入。
+
+| 配置项 | 说明 |
+| --- | --- |
+| `mode` | `"auto"`（默认）= 智能分块。`"fixed"` = 固定长度 + 分隔符回退。 |
+
+**auto 模式**（`chunking.auto`）：`.md` 文件按标题层级智能分块，`.txt` 文件按段落优先分块。代码块和表格不会被切断。
+
+| 配置项 | 说明 |
+| --- | --- |
+| `target_chars` | 目标片段大小。atomic 单元（代码块、表格）可能超过此值。默认值：`700`。 |
+| `split_at_level` | 在几级标题处切分（1-6）。`2` = 在 `#` 和 `##` 处切分。默认值：`3`。 |
+| `min_chars` | 最小字符数，低于此值的片段会被丢弃。默认值：`100`。 |
+| `include_heading` | 在每个片段开头附加所属标题（`> 标题`）。默认值：`false`。 |
+
+**fixed 模式**（`chunking.fixed`）：在 `max_chars` 处切分（硬上限，绝不超出），按优先级回退到最近的分隔符（`\n\n` > `\n` > 标点 > 空格）。
+
+| 配置项 | 说明 |
+| --- | --- |
+| `max_chars` | 单个片段硬上限字符数。绝不超出。默认值：`700`。 |
+| `overlap_chars` | 相邻片段的重叠字符数。默认值：`70`。 |
 
 > **切换模型**：代码有针对特定模型的默认值，可能需要手动调整：
 >
 > - **嵌入模型**：mxbai 模型系列硬编码了查询前缀。其他模型（如 `all-MiniLM-L6-v2`）不使用此前缀——保留会影响检索效果。查看 `lib/embed_engine.py` 中的 `_QUERY_PREFIX`。
 > - **翻译模型**：本地增强器自动选择 `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`。要使用其他模型系列，请在 `config.json` 中显式设置 `model_name`。
 > - **HuggingFace 镜像**：`hf-mirror.com` 为中国用户设置为默认端点。如果你能直接访问 HuggingFace，请移除或覆盖 `HF_ENDPOINT`。
-
-### 检索配置
-
-| 配置项 | 说明 |
-| --- | --- |
-| `retrieval_k` | 每次查询检索的片段数。默认值：`3`。 |
-| `retrieval_distance_threshold` | 全局余弦距离阈值回退值。启用增强时，会被增强器配置中各模式的 `distance_threshold` 覆盖。设为 `null` 禁用过滤。默认值：`0.3`。 |
 
 ### 查询增强（`enhancer`）
 
@@ -148,6 +164,23 @@ python rag_qa.py --search --enhance --retrieval_k 3 --retrieval_distance_thresho
 | `query_lang` | 你提问使用的语言（如 `"zh"`、`"en"`）。 |
 | `model_name` | HuggingFace 模型 ID（可选）。省略时自动选择 `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`。 |
 | `distance_threshold` | 此模式的余弦距离阈值。默认值：`0.3`。 |
+
+### 检索与精排
+
+| 配置项 | 说明 |
+| --- | --- |
+| `retrieval_k` | 每次查询检索的片段数。默认值：`3`。 |
+| `retrieval_distance_threshold` | 全局余弦距离阈值回退值。启用增强时，会被增强器配置中各模式的 `distance_threshold` 覆盖。设为 `null` 禁用过滤。默认值：`0.3`。 |
+
+**精排重排序**（可选）：两阶段检索——向量搜索先召回 `retrieval_k * 4` 个候选，再用 cross-encoder 按相关性精排后截取最终的 `retrieval_k` 个。对 bi-encoder 余弦相似度不足以区分的场景，能显著提升精度。
+
+| 配置项 | 说明 |
+| --- | --- |
+| `reranker_enabled` | 启用 cross-encoder 精排。默认值：`false`。 |
+| `reranker.model_name` | cross-encoder 模型 ID。默认值：`"BAAI/bge-reranker-v2-m3"`。 |
+| `reranker.top_k` | 精排后的片段数。默认值：`null`（使用 `retrieval_k`）。 |
+
+> **性能影响**：GPU 上增加约 100-300ms，CPU 上增加约 500-1000ms。首次加载会下载模型（约 1.1GB），后续使用本地缓存。
 
 ### 答案生成（`llm`）
 
@@ -200,7 +233,8 @@ lib/
 ├── vector_db.py        # Chroma 向量存储操作
 ├── llm_api.py          # 远程 LLM API 客户端（OpenAI 兼容）
 ├── query_enhancer.py   # 查询增强（检索优化改写）
-└── local_translator.py # MarianMT 本地翻译后端
+├── local_translator.py # MarianMT 本地翻译后端
+└── reranker.py         # cross-encoder 精排重排序
 ```
 
 ## 依赖要求
