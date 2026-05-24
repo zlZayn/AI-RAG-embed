@@ -19,11 +19,22 @@ cp config_example.json config.json
 # 3. 构建向量索引（首次运行会下载约 641MB 的嵌入模型）
 python rag_qa.py --build
 
-# 4. 提问（交互模式）
-python rag_qa.py
+# 4. 提问
+python rag_qa.py        # 交互模式（一问一答循环）
 ```
 
 > **注意**：代码默认使用 `hf-mirror.com` 作为 HuggingFace 镜像端点。不要将 `HF_ENDPOINT` 覆盖为 `huggingface.co`——会导致连接超时。
+
+### CLI 速查
+
+```bash
+python rag_qa.py --build              # 构建索引（增量，无变更则跳过）
+python rag_qa.py --rebuild            # 强制重建索引
+python rag_qa.py --search "问题"      # 仅检索，不生成答案
+python rag_qa.py "问题"               # 单次问答
+python rag_qa.py                      # 交互模式
+python rag_qa.py --help               # 查看所有参数说明
+```
 
 ## 使用方法
 
@@ -60,7 +71,12 @@ python rag_qa.py
 
 ```bash
 python rag_qa.py "什么是指数平滑？"
+
+# 开启查询增强（检索优化改写后再搜索）
+python rag_qa.py --enhance "什么是指数平滑？"
 ```
+
+可用 `--retrieval_k`、`--retrieval_distance_threshold`、`--strict_context` 临时覆盖 config.json 中的配置。
 
 ### 仅检索模式
 
@@ -74,18 +90,6 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 ```
 
 返回排名前 `retrieval_k` 个片段（默认 3 个）直接输出到标准输出。使用 `--enhance` 时，查询会先经过增强器处理再进行检索，逻辑与问答模式相同。参见[查询增强](#查询增强enhancer)了解模式差异。
-
-### 命令行覆盖
-
-部分配置字段可通过命令行参数覆盖。省略时回退到 `config.json`，再回退到代码默认值。
-
-```bash
-python rag_qa.py --retrieval_k 10 --retrieval_distance_threshold 0.25 --strict_context true "你的问题"
-
-python rag_qa.py --search --enhance --retrieval_k 3 --retrieval_distance_threshold 0.15 "你的问题"
-```
-
-支持的参数：`--retrieval_k`、`--retrieval_distance_threshold`、`--strict_context`。适用于所有模式（ask、chat、search）。
 
 ### 查询技巧
 

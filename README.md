@@ -19,11 +19,22 @@ cp config_example.json config.json
 # 3. Build the vector index (downloads ~641MB embedding model on first run)
 python rag_qa.py --build
 
-# 4. Ask a question (interactive mode)
-python rag_qa.py
+# 4. Ask a question
+python rag_qa.py        # interactive mode (multi-turn)
 ```
 
 > **Note**: The code uses `hf-mirror.com` as the default HuggingFace endpoint. Do not override `HF_ENDPOINT` with `huggingface.co` -- it will cause connection timeouts.
+
+### CLI Quick Reference
+
+```bash
+python rag_qa.py --build              # build index (incremental)
+python rag_qa.py --rebuild            # force rebuild index
+python rag_qa.py --search "question"  # retrieve only, no answer
+python rag_qa.py "question"           # single question
+python rag_qa.py                      # interactive mode
+python rag_qa.py --help               # show all commands and options
+```
 
 ## Usage
 
@@ -60,7 +71,12 @@ One-shot, saves result to `output/`.
 
 ```bash
 python rag_qa.py "What is exponential smoothing?"
+
+# With query enhancement (retrieval-optimized rewriting before searching)
+python rag_qa.py --enhance "What is exponential smoothing?"
 ```
+
+Use `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context` to override config.json settings temporarily.
 
 ### Search-Only Mode
 
@@ -74,18 +90,6 @@ python rag_qa.py --search --enhance "What is exponential smoothing?"
 ```
 
 Returns the top `retrieval_k` chunks (default: 3) directly to stdout. With `--enhance`, the query is processed through the enhancer before retrieval, same as `cmd_ask`. See [Query Enhancement](#query-enhancement-enhancer) for mode differences.
-
-### CLI Overrides
-
-Some config fields can be overridden via CLI arguments. If omitted, values fall back to `config.json`, then to code defaults.
-
-```bash
-python rag_qa.py --retrieval_k 10 --retrieval_distance_threshold 0.25 --strict_context true "your question"
-
-python rag_qa.py --search --enhance --retrieval_k 3 --retrieval_distance_threshold 0.15 "your question"
-```
-
-Supported: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`. Works with all modes (ask, chat, search).
 
 ### Query Tips
 

@@ -134,8 +134,9 @@ class VectorDb:
                 )
             else:
                 print(
-                    f">> No chunks passed threshold={distance_threshold}, returning top result anyway"
+                    f">> No chunks passed threshold={distance_threshold}, "
+                    f"returning closest result anyway"
                 )
-                documents = [documents[0]]  # 至少返回一个
+                documents = [documents[0]]
 
         return documents

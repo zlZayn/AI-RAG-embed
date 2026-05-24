@@ -78,13 +78,14 @@ Relative paths (`./`) are resolved against the project root.
 ```text
 python rag_qa.py                       →  cmd_chat()             (interactive)
 python rag_qa.py "question"            →  cmd_ask()              (single-shot)
+python rag_qa.py --enhance "question"  →  cmd_ask(use_enhancer=True)  (single-shot with enhancement)
 python rag_qa.py --search "q"          →  cmd_search()           (retrieve only, no enhancer)
 python rag_qa.py --search --enhance "q"→  cmd_search(use_enhancer=True)  (retrieve with enhancement)
 python rag_qa.py --build               →  cmd_build()            (incremental build)
 python rag_qa.py --rebuild             →  cmd_build(force=True)  (full rebuild)
 ```
 
-Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`. These override the corresponding `config.json` fields; if omitted, config values (or code defaults) are used. CLI override takes highest priority, even over per-mode enhancer thresholds.
+Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`, `--enhance`. These override the corresponding `config.json` fields; if omitted, config values (or code defaults) are used. CLI override takes highest priority, even over per-mode enhancer thresholds.
 
 Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing them requires a full `--rebuild`, which is a deliberate operation that should not be triggered accidentally by a CLI flag.
 

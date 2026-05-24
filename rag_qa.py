@@ -314,7 +314,9 @@ def _stream_answer(llm, messages: list[dict]) -> str:
     return answer
 
 
-def cmd_ask(config: dict, question: str) -> None:
+def cmd_ask(config: dict, question: str, use_enhancer: bool = False) -> None:
+    if use_enhancer:
+        config["query_enhance_enabled"] = True
     store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker = (
         _init_ask_chat(config)
     )
@@ -461,16 +463,36 @@ def cmd_chat(config: dict) -> None:
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--build", action="store_true")
-    parser.add_argument("--rebuild", action="store_true")
-    parser.add_argument("--search", action="store_true")
-    parser.add_argument("--enhance", action="store_true")
-    parser.add_argument("--retrieval_k", type=int)
-    parser.add_argument("--retrieval_distance_threshold", type=float)
-    parser.add_argument("--strict_context", type=str)
-    parser.add_argument("question", nargs="*")
-    args, _ = parser.parse_known_args()
+    parser = argparse.ArgumentParser(
+        prog="rag_qa.py",
+        description="RAG-QA: local document retrieval + remote LLM answer generation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "modes:\n"
+            "  --build             Incremental build (skip if no changes)\n"
+            "  --rebuild           Force full re-embed\n"
+            "  --search QUESTION   Retrieve chunks without LLM generation\n"
+            "  QUESTION            Single-question mode\n"
+            "  (no args)           Interactive multi-turn chat\n"
+        ),
+    )
+    parser.add_argument("--build", action="store_true", help="incremental index build")
+    parser.add_argument("--rebuild", action="store_true", help="force full re-embed")
+    parser.add_argument(
+        "--search", action="store_true", help="search-only mode (no LLM)"
+    )
+    parser.add_argument(
+        "--enhance", action="store_true", help="enhance query before retrieval"
+    )
+    parser.add_argument("--retrieval_k", type=int, help="number of chunks to retrieve")
+    parser.add_argument(
+        "--retrieval_distance_threshold", type=float, help="cosine distance threshold"
+    )
+    parser.add_argument(
+        "--strict_context", type=str, help="true/false: answer only from context"
+    )
+    parser.add_argument("question", nargs="*", help="your question")
+    args = parser.parse_args()
 
     with _timed("Loading config"):
         config = load_config()
@@ -486,15 +508,27 @@ def main() -> None:
 
     question = " ".join(args.question)
 
-    if args.build:
+    # Validate mode/question combinations
+    if args.search:
+        if not question:
+            parser.error("--search requires a question")
+        cmd_search(config, question, use_enhancer=args.enhance)
+    elif args.build:
+        if question:
+            print(">> Warning: question ignored with --build", file=sys.stderr)
         cmd_build(config)
     elif args.rebuild:
+        if question:
+            print(">> Warning: question ignored with --rebuild", file=sys.stderr)
         cmd_build(config, force=True)
-    elif args.search:
-        cmd_search(config, question, use_enhancer=args.enhance)
     elif question:
-        cmd_ask(config, question)
+        cmd_ask(config, question, use_enhancer=args.enhance)
     else:
+        if args.enhance:
+            print(
+                ">> Warning: --enhance ignored without --search or question",
+                file=sys.stderr,
+            )
         cmd_chat(config)
 
 
