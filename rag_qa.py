@@ -21,9 +21,9 @@ def _import_lib():
 @contextmanager
 def _timed(label: str):
     t0 = time.perf_counter()
-    print(f">> {label}... ", end="", flush=True)
+    print(f"[step] {label}... ", end="", flush=True)
     yield
-    print(f"\r\033[K>> {label}... done  [{time.perf_counter() - t0:.1f}s]")
+    print(f"\r\033[K[step] {label}... done [{time.perf_counter() - t0:.1f}s]")
 
 
 def _init_embed_store(config: dict):
@@ -57,6 +57,12 @@ _PROJECT_DIR = os.path.dirname(__file__)
 
 def load_config() -> dict:
     config_path = os.path.join(_PROJECT_DIR, "config.json")
+    if not os.path.exists(config_path):
+        print(f"[error] config file not found: {config_path}")
+        print(
+            "[hint] copy config_example.json to config.json and fill in your settings"
+        )
+        sys.exit(1)
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -149,7 +155,7 @@ def _retrieve_context(
     rewritten_question = question
     enhance_label = "Enhanced Question"
 
-    print(">> Processing... ", end="", flush=True)
+    print("[step] processing... ", end="", flush=True)
 
     if query_enhancer:
         rewritten_question = query_enhancer.enhance(question, messages_history)
@@ -158,23 +164,23 @@ def _retrieve_context(
     # Retrieve more candidates when reranker will refine
     k_for_search = retrieval_k * 4 if reranker else retrieval_k
 
-    print("\r\033[K>> Retrieving... ", end="", flush=True)
+    print("\r\033[K[step] retrieving... ", end="", flush=True)
     chunks = store.query(
         rewritten_question,
         k=k_for_search,
         distance_threshold=retrieval_distance_threshold,
     )
     if not chunks:
-        print("\r\033[K>> No relevant chunks found. Skipping.\n")
+        print("\r\033[K[info] no relevant chunks found, skipping\n")
         return RetrieveResult([], None, rewritten_question, enhance_label)
 
     # Rerank and trim to final retrieval_k
     if reranker:
-        print(f"\r\033[K>> Reranking {len(chunks)} chunks... ", end="", flush=True)
+        print(f"\r\033[K[step] reranking {len(chunks)} chunks... ", end="", flush=True)
         top_k = reranker_top_k or retrieval_k
         chunks = reranker.rerank(rewritten_question, chunks, top_k=top_k)
 
-    print(f"\r\033[K>> Retrieved {len(chunks)} chunks. Generating...")
+    print(f"\r\033[K[step] retrieved {len(chunks)} chunks, generating...")
 
     context = "\n\n".join(chunks)
     messages = [{"role": "system", "content": system_prompt}]
@@ -277,7 +283,7 @@ def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
         enhancer, enhancer_threshold = _init_enhancer(config)
         if enhancer:
             question = enhancer.enhance(question)
-            print(f">> {enhancer.label}: {question}")
+            print(f"[info] {enhancer.label}: {question}")
             if enhancer_threshold is not None and not config.get("_cli_threshold"):
                 distance_threshold = enhancer_threshold
 
@@ -290,11 +296,11 @@ def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
     )
 
     if not chunks:
-        print(">> No relevant chunks found.")
+        print("[info] no relevant chunks found")
         return
 
     if reranker:
-        print(f">> Reranking {len(chunks)} chunks... ", end="", flush=True)
+        print(f"[step] reranking {len(chunks)} chunks... ", end="", flush=True)
         top_k = config.get("reranker", {}).get("top_k") or retrieval_k
         chunks = reranker.rerank(question, chunks, top_k=top_k)
         print("done")
@@ -347,7 +353,7 @@ def cmd_ask(config: dict, question: str, use_enhancer: bool = False) -> None:
     _export_round(
         out_dir, 1, question, chunks, answer, rewritten_question, enhance_label
     )
-    print(f"\nSaved to {out_dir}")
+    print(f"\n[info] saved to {out_dir}")
 
 
 def _has_file_changes(persist_dir: str, file_hashes: dict[str, str]) -> bool:
@@ -368,19 +374,22 @@ def cmd_build(config: dict, force: bool = False) -> None:
     persist_dir = _resolve_path(config, "chroma_persist_dir")
 
     if not os.path.isdir(docs_dir):
-        print(f">> Error: documents directory not found: {docs_dir}")
+        print(f"[error] docs directory not found: {docs_dir}")
+        print("[hint] check docs_dir in config.json, or create the directory")
         sys.exit(1)
 
     with _timed("Loading and chunking documents"):
         chunks, file_hashes = load_documents(docs_dir, config)
     if not chunks:
-        print(">> No .txt or .md files found in documents directory.")
+        print("[error] no .txt or .md files found in docs directory")
         sys.exit(1)
-    print(f">> {len(chunks)} chunks from {len({c['source'] for c in chunks})} files")
+    print(
+        f"[info] {len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
+    )
 
     if not force and not _has_file_changes(persist_dir, file_hashes):
-        print(">> No changes detected. Skipping.")
-        print(f">> Build complete  [{time.perf_counter() - t0:.1f}s total]")
+        print("[info] no changes detected, skipping")
+        print(f"[step] build complete [{time.perf_counter() - t0:.1f}s total]")
         return
 
     store, _ = _init_embed_store(config)
@@ -391,7 +400,7 @@ def cmd_build(config: dict, force: bool = False) -> None:
         else:
             store.rebuild(chunks, file_hashes)
 
-    print(f">> Build complete  [{time.perf_counter() - t0:.1f}s total]")
+    print(f"[step] build complete [{time.perf_counter() - t0:.1f}s total]")
 
 
 def cmd_chat(config: dict) -> None:
@@ -405,7 +414,7 @@ def cmd_chat(config: dict) -> None:
         else config.get("retrieval_distance_threshold")
     )
 
-    print("\nReady. Type your question (or /exit /quit /q to quit).\n")
+    print("\nAsk a question. Be specific. /quit or /q to quit.\n")
 
     out_dir = None
     round_index = 0
@@ -421,7 +430,7 @@ def cmd_chat(config: dict) -> None:
 
         if not question:
             continue
-        if question in ("/exit", "/quit", "/q"):
+        if question in ("/quit", "/q"):
             break
 
         recent_history = history[-max_rounds * 2 :] if max_rounds else history
@@ -515,18 +524,18 @@ def main() -> None:
         cmd_search(config, question, use_enhancer=args.enhance)
     elif args.build:
         if question:
-            print(">> Warning: question ignored with --build", file=sys.stderr)
+            print("[warn] question ignored with --build", file=sys.stderr)
         cmd_build(config)
     elif args.rebuild:
         if question:
-            print(">> Warning: question ignored with --rebuild", file=sys.stderr)
+            print("[warn] question ignored with --rebuild", file=sys.stderr)
         cmd_build(config, force=True)
     elif question:
         cmd_ask(config, question, use_enhancer=args.enhance)
     else:
         if args.enhance:
             print(
-                ">> Warning: --enhance ignored without --search or question",
+                "[warn] --enhance ignored without --search or question",
                 file=sys.stderr,
             )
         cmd_chat(config)

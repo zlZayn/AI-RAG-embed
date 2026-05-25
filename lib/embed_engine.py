@@ -12,6 +12,7 @@ class EmbedEngine:
         try:
             self._model = SentenceTransformer(model_name, local_files_only=True)
         except Exception:
+            print(f"[load] downloading embedding model: {model_name}")
             self._model = SentenceTransformer(model_name)
 
     def get_embedding(self, text: str) -> list[float]:

@@ -56,13 +56,15 @@ python rag_qa.py
 ```
 
 ```text
+Ask a question. Be specific. /quit or /q to quit.
+
 >>> What is exponential smoothing?
 Exponential smoothing is a forecasting method...
 
 >>> How many types are there?
 The system understands "types" refers to exponential smoothing types from our previous discussion.
 
->>> /exit
+>>> /quit
 ```
 
 ### Single-Question Mode

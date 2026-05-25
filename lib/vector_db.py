@@ -72,8 +72,8 @@ class VectorDb:
 
         total = self._collection.count()
         print(
-            f">> Incremental: +{len(added)} new, ~{len(changed)} updated, "
-            f"-{len(removed)} removed. Total: {total} chunks"
+            f"[info] incremental: +{len(added)} new, ~{len(changed)} updated, "
+            f"-{len(removed)} removed, total {total} chunks"
         )
 
     def rebuild_full(self, chunks: list[dict], file_hashes: dict[str, str]) -> None:
@@ -114,13 +114,13 @@ class VectorDb:
         if not documents:
             return []
 
-        # 打印距离信息用于调试
-        print("\n>> Retrieval details:")
+        print("\n[debug] retrieval details")
         for i, (doc, dist) in enumerate(zip(documents, distances)):
-            similarity = 1 - dist  # 转换距离到相似度
-            print(f"  Chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}")
+            similarity = 1 - dist
+            print(
+                f"[debug]   chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}"
+            )
 
-        # 如果设置了阈值，过滤结果
         if distance_threshold is not None:
             filtered = [
                 (doc, dist)
@@ -130,12 +130,11 @@ class VectorDb:
             if filtered:
                 documents = [item[0] for item in filtered]
                 print(
-                    f">> Filtered to {len(documents)} chunks (threshold={distance_threshold})"
+                    f"[debug] filtered to {len(documents)} chunks (threshold={distance_threshold})"
                 )
             else:
                 print(
-                    f">> No chunks passed threshold={distance_threshold}, "
-                    f"returning closest result anyway"
+                    f"[warn] no chunks passed threshold={distance_threshold}, returning closest"
                 )
                 documents = [documents[0]]
 

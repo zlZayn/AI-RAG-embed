@@ -56,13 +56,15 @@ python rag_qa.py
 ```
 
 ```text
+Ask a question. Be specific. /quit or /q to quit.
+
 >>> 什么是指数平滑？
 指数平滑是一种预测方法……
 
 >>> 有几种类型？
 系统理解"类型"指的是上一轮讨论中的指数平滑类型。
 
->>> /exit
+>>> /quit
 ```
 
 ### 单次提问模式

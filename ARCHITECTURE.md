@@ -91,7 +91,7 @@ Only query-time parameters are exposed as CLI overrides. Indexing parameters (`c
 
 Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_embed_store()`. `cmd_search` and `cmd_build` call `_init_embed_store()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` first checks for file changes using only stdlib `json`; `_import_lib()` is called only when changes are detected. This avoids import-time side effects in IPython (`%run`) environments where signal handling can conflict with these libraries.
 
-Progress messages use the `_timed(label)` context manager for consistent `">> {label}... done  [Xs]"` formatting.
+Progress messages use the `_timed(label)` context manager for consistent `[step] {label}... done [Xs]` formatting.
 
 ## Build Workflow
 
@@ -109,7 +109,7 @@ cmd_build()
 ├─► _has_file_changes(persist_dir, file_hashes)
 │   ├─ read build_meta.json directly (json.load, no heavy imports)
 │   ├─ compare keys + hash values
-│   └─ if no changes → print "No changes detected", return early
+│   └─ if no changes → print "[info] no changes detected, skipping", return early
 │
 └─► [only if changes detected]
     ├─► _init_embed_store(config)
@@ -152,7 +152,7 @@ cmd_search(question, use_enhancer=True)
 
 ```text
 _retrieve_context(..., retrieval_distance_threshold=None, reranker=None) -> RetrieveResult(chunks, messages, rewritten_question, enhance_label)
-├─► print ">> Processing..."
+├─► print "[step] processing..."
 │
 ├─► [optional] query_enhancer.enhance(question, messages_history)
 │   ├─ LLM mode:
@@ -160,7 +160,7 @@ _retrieve_context(..., retrieval_distance_threshold=None, reranker=None) -> Retr
 │   │   With history: rewrite as standalone query (resolve pronouns/ellipsis), then generate retrieval paragraph
 │   └─ Local mode: translate to docs_lang via MarianMT (no rewrite, no term replacement)
 │
-├─► print ">> Retrieving..."
+├─► print "[step] retrieving..."
 ├─► k_for_search = retrieval_k * 4  (if reranker enabled, else retrieval_k)
 ├─► store.query(rewritten_question, k_for_search, distance_threshold)
 │   ├─ embed_engine.get_embedding(rewritten_question)  →  vector
@@ -176,7 +176,7 @@ _retrieve_context(..., retrieval_distance_threshold=None, reranker=None) -> Retr
 │   ├─ sort by score descending
 │   └─ return top retrieval_k chunks
 │
-├─► print ">> Retrieved N chunks. Generating..."
+├─► print "[step] retrieved N chunks, generating..."
 │
 └─► _stream_answer(llm, messages)
     llm.generate_stream(messages) → iter[str]
@@ -310,7 +310,7 @@ VectorDb(persist_dir, embed_engine=None)
 - `chromadb.PersistentClient` with cosine distance (`hnsw:space: "cosine"`).
 - Collection name: `"documents"`.
 - Telemetry disabled.
-- `rebuild()` prints an incremental summary: `+N new, ~N updated, -N removed. Total: N`.
+- `rebuild()` prints an incremental summary: `[info] incremental: +N new, ~N updated, -N removed, total N chunks`.
 
 ### lib/llm_api.py
 
@@ -324,7 +324,7 @@ LlmApi(api_key, base_url, model, temperature=0.3, thinking_mode=False)
 - Temperature and thinking_mode are set at initialization.
 - `generate()` is implemented as `"".join(generate_stream(messages))` -- not a separate code path.
 - `thinking_mode` is passed via `extra_body={"thinking_mode": True}` in the API request.
-- No retry logic -- network errors propagate to caller.
+- Retry logic: 3 attempts with exponential backoff (1s, 2s, 4s). Prints `[retry]` status on each attempt; raises after final failure.
 
 ### lib/query_enhancer.py
 
@@ -345,7 +345,7 @@ Two backends, selected by which constructor argument is provided:
 
 - Calls `translator.translate(question)` directly. Pure translation via MarianMT — no term replacement, no conversation-context rewrite. History parameter is accepted but ignored.
 
-Returns the result as a single string. If the LLM call fails, silently falls back to the original question. Used **only for retrieval** — the answer LLM always receives the original question to preserve the user's language.
+Returns the result as a single string. If the LLM call fails, prints a `[warn]` message and falls back to the original question. Used **only for retrieval** — the answer LLM always receives the original question to preserve the user's language.
 
 ### lib/local_translator.py
 
@@ -417,10 +417,13 @@ The model is cached to `~/.cache/huggingface/` after first download.
 
 | Condition | Behavior |
 | --- | --- |
-| `documents/` not found at build time | Print message, exit code 1 |
-| No `.txt`/`.md` files found | Print message, exit code 1 |
-| No relevant chunks for a question | Print message, skip round (does not crash) |
+| `documents/` not found at build time | `[error]` + `[hint]`, exit code 1 |
+| No `.txt`/`.md` files found | `[error]`, exit code 1 |
+| Config file not found | `[error]` + `[hint]`, exit code 1 |
+| No relevant chunks for a question | `[info]`, skip round |
+| API network errors | `[retry]` 3x with backoff (1s, 2s, 4s); `[error]` after final failure |
+| Query enhancement failure | `[warn]`, fall back to original question |
+| Embedding model not cached | `[load]` download status, download from HuggingFace |
+| Translation model not cached | `[load]` download status, download from HuggingFace |
 | Invalid enhancer `mode` value | `ValueError` raised with valid options |
-| API network errors | Unhandled exception (stack trace visible) |
-| Embedding model download failure | `SentenceTransformer` raises, process exits |
 | Chroma persistence errors | Raised by `chromadb`, not caught (disk/permission issue) |

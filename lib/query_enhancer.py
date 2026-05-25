@@ -22,8 +22,12 @@ class QueryEnhancer:
         try:
             response = self._llm.generate(messages)
             response = response.strip()
-            return response if response else question
-        except Exception:
+            if response:
+                return response
+            print("[warn] enhancement returned empty, using original question")
+            return question
+        except Exception as e:
+            print(f"[warn] enhancement failed: {e}, using original question")
             return question
 
     def _build_prompt(self, question: str, history: list | None = None) -> str:

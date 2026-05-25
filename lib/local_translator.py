@@ -23,6 +23,7 @@ class LocalTranslator:
                 )
                 model = MarianMTModel.from_pretrained(model_name, local_files_only=True)
             except Exception:
+                print(f"[load] downloading translation model: {model_name}")
                 tokenizer = MarianTokenizer.from_pretrained(model_name)
                 model = MarianMTModel.from_pretrained(model_name)
             cls._cache[model_name] = (tokenizer, model)
