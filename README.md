@@ -138,7 +138,7 @@ Controls how documents are split into chunks for embedding.
 | --- | --- |
 | `mode` | `"auto"` (default) = smart splitting. `"fixed"` = fixed-length with separator fallback. |
 
-**Auto mode** (`chunking.auto`): Heading-aware for `.md` files, paragraph-first for `.txt`/`.typ` files. Code blocks and tables are never split.
+**Auto mode** (`chunking.auto`): Heading-aware for `.md` and `.typ` files (headings, tables, code blocks are detected; preamble and comments are skipped for `.typ`). Paragraph-first for `.txt` files. Code blocks and tables are never split.
 
 | Key | Description |
 | --- | --- |

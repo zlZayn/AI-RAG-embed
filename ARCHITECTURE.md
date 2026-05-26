@@ -104,7 +104,7 @@ cmd_build()
 │   ├─ pre-scan: walk tree, collect .doc_loader_ignore specs
 │   ├─ os.walk: collect .txt/.md/.typ files, skip ignored
 │   ├─ read UTF-8 content, compute MD5 hash per file
-│   └─ smart split: auto mode (md: heading-aware; txt/typ: paragraph-first) or fixed mode (separator-priority fallback)
+│   └─ smart split: auto mode (md/typ: heading-aware; txt: paragraph-first) or fixed mode (separator-priority fallback)
 │       returns (chunks, file_hashes)
 │       chunks: [{"text": str, "source": "relative/path"}, ...]
 │       file_hashes: {"relative/path": "md5hex", ...}
@@ -286,13 +286,13 @@ load_documents(docs_dir, config) -> (list[dict], dict[str, str])
 - Computes MD5 hash per file for incremental rebuild detection.
 - Skips empty files.
 - Supported extensions: `.txt`, `.md`, `.typ`. Files with other extensions are silently skipped.
-- `.typ` files are read as plain UTF-8 text and chunked the same as `.txt` (paragraph-first in auto mode).
 - Two chunking modes controlled by `chunking.mode`:
 
 **auto mode** (default, `chunking.auto`):
 
 - `.md` files: parses Markdown into structural units (headings, paragraphs, code blocks, tables), groups by heading level (`split_at_level`), then merges within sections. Code blocks and tables are atomic — never split even if they exceed `target_chars`.
-- `.txt` and `.typ` files: splits on paragraph boundaries (`\n\n`, falls back to `\n`). Paragraphs are never cut — a paragraph either fits into the current chunk or starts a new one.
+- `.typ` files: parses Typst into structural units (headings via `= `, tables via `#figure`/`#table`, blockquotes via `#quote`, code blocks, paragraphs). Skips preamble (`#set`/`#show`/`#let`), comments (`//`), and non-content elements. Groups by heading level, same as Markdown. Code blocks and tables are atomic.
+- `.txt` files: splits on paragraph boundaries (`\n\n`, falls back to `\n`). Paragraphs are never cut — a paragraph either fits into the current chunk or starts a new one.
 - `target_chars`: target chunk size. Atomic units (code blocks, tables) may exceed this. Default: `700`.
 - `min_chars`: sections shorter than this are dropped as noise.
 - `include_heading`: if `true`, prepends the section heading (`> heading`) to each chunk.

@@ -8,15 +8,21 @@ _IGNORE_FILE = ".doc_loader_ignore"
 
 _BREAK_PRIORITY = ["\n\n", "\n", "。", "！", "？", ".", "!", "?", " "]
 
-# Markdown parsing constants
+# Structural unit types (shared by Markdown and Typst)
 UNIT_HEADING = "heading"
 UNIT_PARAGRAPH = "paragraph"
 UNIT_CODE = "code"
 UNIT_TABLE = "table"
 
-HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+# Markdown-specific patterns
+MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+MD_TABLE_ROW_RE = re.compile(r"^\|.+\||.+\|.+\|")
+
+# Typst-specific patterns
+TY_HEADING_RE = re.compile(r"^(=+)\s+(.+)$")
+
+# Shared
 CODE_FENCE = "```"
-TABLE_ROW_RE = re.compile(r"^\|.+\||.+\|.+\|")
 
 
 # ---------------------------------------------------------------------------
@@ -188,8 +194,8 @@ def _extract_code_block(lines: list[str], start: int) -> tuple[str, int]:
     return content, end
 
 
-def _extract_table(lines: list[str], start: int) -> tuple[str, int]:
-    """Extract table starting at lines[start]. Returns (content, end_index)."""
+def _extract_md_table(lines: list[str], start: int) -> tuple[str, int]:
+    """Extract Markdown pipe table starting at lines[start]. Returns (content, end_index)."""
     end = start
     while end < len(lines):
         line = lines[end].strip()
@@ -200,8 +206,8 @@ def _extract_table(lines: list[str], start: int) -> tuple[str, int]:
     return content, end
 
 
-def _extract_paragraph(lines: list[str], start: int) -> tuple[str, int]:
-    """Extract paragraph starting at lines[start]. Returns (content, end_index)."""
+def _extract_md_paragraph(lines: list[str], start: int) -> tuple[str, int]:
+    """Extract Markdown paragraph starting at lines[start]. Returns (content, end_index)."""
     end = start
     while end < len(lines):
         line = lines[end].strip()
@@ -209,9 +215,9 @@ def _extract_paragraph(lines: list[str], start: int) -> tuple[str, int]:
             break
         # Stop if we hit a heading, code fence, or table row
         if (
-            HEADING_RE.match(line)
+            MD_HEADING_RE.match(line)
             or line.startswith(CODE_FENCE)
-            or TABLE_ROW_RE.match(line)
+            or MD_TABLE_ROW_RE.match(line)
         ):
             break
         end += 1
@@ -236,7 +242,7 @@ def _parse_markdown(text: str) -> list[dict]:
             continue
 
         # 2. Heading
-        match = HEADING_RE.match(line)
+        match = MD_HEADING_RE.match(line)
         if match:
             level = len(match.group(1))
             content = match.group(2).strip()
@@ -245,15 +251,15 @@ def _parse_markdown(text: str) -> list[dict]:
             continue
 
         # 3. Table
-        if TABLE_ROW_RE.match(line):
-            content, end = _extract_table(lines, i)
+        if MD_TABLE_ROW_RE.match(line):
+            content, end = _extract_md_table(lines, i)
             units.append({"type": UNIT_TABLE, "content": content})
             i = end
             continue
 
         # 4. Paragraph
         if line.strip():
-            content, end = _extract_paragraph(lines, i)
+            content, end = _extract_md_paragraph(lines, i)
             units.append({"type": UNIT_PARAGRAPH, "content": content})
             i = end
             continue
@@ -378,6 +384,155 @@ def _load_markdown(text: str, cfg: dict, source: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# auto mode - typst
+# ---------------------------------------------------------------------------
+
+
+def _extract_balanced_paren(lines: list[str], start: int) -> tuple[int, int]:
+    """Skip () parameter block starting at lines[start]. Returns (end_line, end_col)."""
+    depth = 0
+    for i in range(start, len(lines)):
+        for j, ch in enumerate(lines[i]):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return i, j + 1
+    return len(lines) - 1, len(lines[-1])
+
+
+def _extract_balanced_block(
+    lines: list[str], start: int, open_ch: str, close_ch: str
+) -> tuple[str, int]:
+    """Extract a balanced bracket/paren block. Returns (content, end_line)."""
+    depth = 0
+    for i in range(start, len(lines)):
+        for ch in lines[i]:
+            if ch == open_ch:
+                depth += 1
+            elif ch == close_ch:
+                depth -= 1
+                if depth == 0:
+                    return "\n".join(lines[start : i + 1]), i + 1
+    return "\n".join(lines[start:]), len(lines)
+
+
+def _extract_ty_paragraph(lines: list[str], start: int) -> tuple[str, int]:
+    """Extract Typst paragraph starting at lines[start]. Returns (content, end_index)."""
+    end = start
+    while end < len(lines):
+        line = lines[end].strip()
+        if not line:
+            break
+        if (
+            TY_HEADING_RE.match(line)
+            or line.startswith(CODE_FENCE)
+            or re.match(r"\s*#(figure|table)\s*\(", line)
+            or re.match(r"\s*#quote\s*\(", line)
+        ):
+            break
+        end += 1
+    return "\n".join(lines[start:end]), end
+
+
+def _parse_typst(text: str) -> list[dict]:
+    """Parse Typst text into a list of structural units."""
+    units = []
+    lines = text.split("\n")
+    i = 0
+
+    # Skip preamble: everything before the first "= " heading
+    while i < len(lines):
+        if TY_HEADING_RE.match(lines[i]):
+            break
+        i += 1
+
+    while i < len(lines):
+        line = lines[i]
+
+        # Code block (same as Markdown)
+        if line.strip().startswith(CODE_FENCE):
+            content, end = _extract_code_block(lines, i)
+            units.append({"type": UNIT_CODE, "content": content})
+            i = end
+            continue
+
+        # Heading: = ... ======
+        match = TY_HEADING_RE.match(line)
+        if match:
+            level = len(match.group(1))
+            content = match.group(2).strip()
+            units.append({"type": UNIT_HEADING, "content": content, "level": level})
+            i += 1
+            continue
+
+        # Table: #figure( or #table(
+        if re.match(r"\s*#(figure|table)\s*\(", line):
+            content, end = _extract_balanced_block(lines, i, "(", ")")
+            units.append({"type": UNIT_TABLE, "content": content})
+            i = end
+            continue
+
+        # Quote: #quote(...) — skip () params, then extract [] content
+        if re.match(r"\s*#quote\s*\(", line):
+            end_line, end_col = _extract_balanced_paren(lines, i)
+            remaining = lines[end_line][end_col:]
+            if "[" in remaining:
+                bracket_start = end_line
+            else:
+                bracket_start = end_line + 1
+            if bracket_start < len(lines):
+                content, end = _extract_balanced_block(lines, bracket_start, "[", "]")
+            else:
+                content, end = "", bracket_start
+            units.append({"type": UNIT_PARAGRAPH, "content": content})
+            i = end
+            continue
+
+        # Skip non-content: comments, style rules, code
+        stripped = line.strip()
+        if (
+            stripped.startswith("//")
+            or re.match(r"^#(set|show|let|hr|pagebreak|v|h|import|include)\b", stripped)
+            or stripped.startswith("#{")
+        ):
+            i += 1
+            continue
+
+        # Paragraph
+        if line.strip():
+            content, end = _extract_ty_paragraph(lines, i)
+            units.append({"type": UNIT_PARAGRAPH, "content": content})
+            i = end
+            continue
+
+        i += 1
+
+    return units
+
+
+def _load_typst(text: str, cfg: dict, source: str) -> list[dict]:
+    """Typst smart chunking entry point."""
+    auto = cfg["auto"]
+    units = _parse_typst(text)
+    sections = _group_by_headings(units, auto["split_at_level"])
+
+    chunks = []
+    for section in sections:
+        chunks.extend(
+            _chunk_section(
+                section,
+                max_chars=cfg["max_chars"],
+                min_chars=auto["min_chars"],
+                include_heading=auto["include_heading"],
+                source=source,
+            )
+        )
+    return chunks
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -409,7 +564,6 @@ def load_documents(docs_dir: str, config: dict) -> tuple[list[dict], dict]:
                 continue
 
             file_hashes[relative_path] = hashlib.md5(text.encode("utf-8")).hexdigest()
-            is_md = filename.endswith(".md")
 
             if cfg["mode"] == "fixed":
                 file_chunks = _load_fixed(
@@ -418,16 +572,17 @@ def load_documents(docs_dir: str, config: dict) -> tuple[list[dict], dict]:
                     cfg["max_chars"],
                     cfg["fixed"]["overlap_chars"],
                 )
+            elif filename.endswith(".md"):
+                file_chunks = _load_markdown(text, cfg, source=relative_path)
+            elif filename.endswith(".typ"):
+                file_chunks = _load_typst(text, cfg, source=relative_path)
             else:
-                if is_md:
-                    file_chunks = _load_markdown(text, cfg, source=relative_path)
-                else:
-                    file_chunks = [
-                        {"text": t, "source": relative_path}
-                        for t in _chunk_plain_text(
-                            text, cfg["max_chars"], cfg["auto"]["min_chars"]
-                        )
-                    ]
+                file_chunks = [
+                    {"text": t, "source": relative_path}
+                    for t in _chunk_plain_text(
+                        text, cfg["max_chars"], cfg["auto"]["min_chars"]
+                    )
+                ]
 
             chunks.extend(file_chunks)
 
