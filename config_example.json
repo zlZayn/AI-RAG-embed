@@ -14,7 +14,10 @@
             "overlap_chars": 70
         }
     },
-    "embedding_model_name": "mixedbread-ai/mxbai-embed-large-v1",
+    "embedding_model_name": {
+        "zh": "BAAI/bge-small-zh-v1.5",
+        "en": "mixedbread-ai/mxbai-embed-large-v1"
+    },
     "chroma_persist_dir": "./chroma_db",
     "query_enhance_enabled": true,
     "enhancer": {
@@ -33,6 +36,7 @@
             "distance_threshold": 0.2
         }
     },
+    "bm25_enabled": true,
     "retrieval_k": 3,
     "retrieval_distance_threshold": 0.3,
     "reranker_enabled": false,
@@ -42,7 +46,7 @@
     },
     "llm": {
         "api_base_url": "https://api.deepseek.com",
-        "api_key": "tp-your-api-key-here",
+        "api_key": "sk-your-api-key-here",
         "model": "deepseek-v4-flash",
         "temperature": 0.3,
         "thinking_mode": false

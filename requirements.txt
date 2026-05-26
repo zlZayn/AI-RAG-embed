@@ -5,3 +5,5 @@ pathspec
 transformers
 sentencepiece
 sacremoses
+jieba
+rank-bm25

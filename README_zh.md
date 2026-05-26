@@ -4,7 +4,7 @@
 
 ## 概述
 
-将 `.txt`/`.md` 文件放入 `documents/` 目录，本地构建向量索引，然后基于你的文档内容向远程 LLM 提问获取答案。
+将 `.txt`/`.md`/`.typ` 文件放入 `documents/` 目录，本地构建向量索引，然后基于你的文档内容向远程 LLM 提问获取答案。
 
 ## 快速开始
 
@@ -14,9 +14,9 @@ pip install -r requirements.txt
 # 1. 将 config_example.json 复制为 config.json 并填入 API Key
 cp config_example.json config.json
 
-# 2. 将 .txt / .md 文件放入 documents/ 目录
+# 2. 将 .txt / .md / .typ 文件放入 documents/ 目录
 
-# 3. 构建向量索引（首次运行会下载约 641MB 的嵌入模型）
+# 3. 构建向量索引（首次运行会下载嵌入模型）
 python rag_qa.py --build
 
 # 4. 提问
@@ -45,7 +45,7 @@ python rag_qa.py --build    # 增量构建：无文件变更时跳过
 python rag_qa.py --rebuild  # 强制重新嵌入
 ```
 
-`--build` 仅检测文件内容变更。如果修改了 `config.json` 中的 `chunking` 或 `embedding_model_name`，需要使用 `--rebuild` 重新嵌入所有内容。
+`--build` 检测文件内容变更和嵌入模型变更。在 `config.json` 中切换模型会自动触发全量重建，无需手动 `--rebuild`。
 
 ### 交互模式
 
@@ -109,11 +109,26 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 
 | 配置项 | 说明 |
 | --- | --- |
-| `docs_dir` | 存放 `.txt` / `.md` 文件的目录（含子目录）。使用 `.doc_loader_ignore` 排除文件（`.gitignore` 语法）。 |
-| `docs_lang` | 文档语言（如 `"en"`、`"zh"`）。增强器会生成此语言的输出用于检索。 |
+| `docs_dir` | 存放文档文件的目录（含子目录）。使用 `.doc_loader_ignore` 排除文件（`.gitignore` 语法）。 |
+| `docs_lang` | 文档语言（`"en"`、`"zh"` 等）。控制嵌入模型的选择和查询前缀的使用。 |
 | `chunking` | 分块配置对象，包含 `mode` 及模式专属子项，详见下方。 |
-| `embedding_model_name` | HuggingFace 模型 ID，用于向量嵌入。详见下方说明。 |
+| `embedding_model_name` | 嵌入模型配置。支持字符串（单模型）或对象（按 `docs_lang` 映射模型 ID），详见下方。 |
 | `chroma_persist_dir` | 向量数据库的保存目录。 |
+
+**`embedding_model_name`** 支持两种格式：
+
+```json
+// 单模型：所有语言共用
+"embedding_model_name": "BAAI/bge-small-zh-v1.5"
+
+// 按语言映射：根据 docs_lang 自动选择
+"embedding_model_name": {
+    "zh": "BAAI/bge-small-zh-v1.5",
+    "en": "mixedbread-ai/mxbai-embed-large-v1"
+}
+```
+
+使用按语言映射格式时，修改 `docs_lang` 会自动切换模型和查询前缀。模型维度变化会被自动处理——`--build` 检测到切换后会从头重建索引。
 
 ### 分块配置（`chunking`）
 
@@ -123,7 +138,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | --- | --- |
 | `mode` | `"auto"`（默认）= 智能分块。`"fixed"` = 固定长度 + 分隔符回退。 |
 
-**auto 模式**（`chunking.auto`）：`.md` 文件按标题层级智能分块，`.txt` 文件按段落优先分块。代码块和表格不会被切断。
+**auto 模式**（`chunking.auto`）：`.md` 文件按标题层级智能分块，`.txt`/`.typ` 文件按段落优先分块。代码块和表格不会被切断。
 
 | 配置项 | 说明 |
 | --- | --- |
@@ -138,12 +153,6 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | --- | --- |
 | `max_chars` | 单个片段硬上限字符数。绝不超出。默认值：`700`。 |
 | `overlap_chars` | 相邻片段的重叠字符数。默认值：`70`。 |
-
-> **切换模型**：代码有针对特定模型的默认值，可能需要手动调整：
->
-> - **嵌入模型**：mxbai 模型系列硬编码了查询前缀。其他模型（如 `all-MiniLM-L6-v2`）不使用此前缀——保留会影响检索效果。查看 `lib/embed_engine.py` 中的 `_QUERY_PREFIX`。
-> - **翻译模型**：本地增强器自动选择 `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`。要使用其他模型系列，请在 `config.json` 中显式设置 `model_name`。
-> - **HuggingFace 镜像**：`hf-mirror.com` 为中国用户设置为默认端点。如果你能直接访问 HuggingFace，请移除或覆盖 `HF_ENDPOINT`。
 
 ### 查询增强（`enhancer`）
 
@@ -175,6 +184,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 
 | 配置项 | 说明 |
 | --- | --- |
+| `bm25_enabled` | 启用 BM25 关键词检索，与向量搜索并行召回，结果通过 RRF（Reciprocal Rank Fusion）融合排序。提升精确术语匹配（如专有名词、缩写）。默认值：`false`。 |
 | `retrieval_k` | 每次查询检索的片段数。默认值：`3`。 |
 | `retrieval_distance_threshold` | 全局余弦距离阈值回退值。启用增强时，会被增强器配置中各模式的 `distance_threshold` 覆盖。设为 `null` 禁用过滤。默认值：`0.3`。 |
 
@@ -205,6 +215,12 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 在 `documents/` 的任意子目录下放置 `.doc_loader_ignore` 文件。使用 `.gitignore` 语法。规则适用于所在目录及所有子目录。
 
 ```text
+# documents/.doc_loader_ignore
+r4ds_textbook/
+fpp3_textbook/
+```
+
+```text
 # documents/fpp3_textbook/.doc_loader_ignore
 README.md
 *.log
@@ -230,13 +246,14 @@ output/
 rag_qa.py               # 入口（--build | --rebuild | --search | 问题 | 交互）
 config.json             # 你的配置（已 gitignore）
 config_example.json     # 配置模板
-documents/              # 存放 .txt / .md 文件
+documents/              # 存放 .txt / .md / .typ 文件
 chroma_db/              # 持久化向量数据库（生成）
 output/                 # 对话导出（生成）
 lib/
 ├── doc_loader.py       # 文件读取 + 文本分片 + 忽略规则
 ├── embed_engine.py     # 嵌入模型封装（sentence-transformers）
-├── vector_db.py        # Chroma 向量存储操作
+├── vector_db.py        # Chroma 向量存储 + 混合检索
+├── bm25_retriever.py   # BM25 关键词检索器（jieba + rank-bm25）
 ├── llm_api.py          # 远程 LLM API 客户端（OpenAI 兼容）
 ├── query_enhancer.py   # 查询增强（检索优化改写）
 ├── local_translator.py # MarianMT 本地翻译后端
@@ -249,6 +266,7 @@ lib/
 
 - Python 3.10+
 - `sentence-transformers`、`chromadb`、`openai`、`pathspec`（核心依赖）
+- `jieba`、`rank-bm25`（BM25 混合检索）
 - `transformers`、`sentencepiece`、`sacremoses`（仅 `mode: "local"` 需要）
 
 ### GPU 配置（可选）

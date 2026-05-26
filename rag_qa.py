@@ -7,6 +7,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import NamedTuple
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from lib.doc_loader import load_documents
 
 
@@ -26,15 +29,27 @@ def _timed(label: str):
     print(f"\r\033[K[step] {label}... done [{time.perf_counter() - t0:.1f}s]")
 
 
+def _resolve_model_name(config: dict) -> str:
+    model = config["embedding_model_name"]
+    if isinstance(model, dict):
+        lang = config.get("docs_lang", "en")
+        return model.get(lang) or next(iter(model.values()))
+    return model
+
+
 def _init_embed_store(config: dict):
     with _timed("Importing modules"):
         EmbedEngine, LlmApi, VectorDb = _import_lib()
+    model_name = _resolve_model_name(config)
+    lang = config.get("docs_lang", "en")
     with _timed("Loading embedding model"):
-        embed_engine = EmbedEngine(model_name=config["embedding_model_name"])
+        embed_engine = EmbedEngine(model_name=model_name, lang=lang)
     with _timed("Loading vector index"):
         store = VectorDb(
             persist_dir=_resolve_path(config, "chroma_persist_dir"),
             embed_engine=embed_engine,
+            bm25_enabled=config.get("bm25_enabled", False),
+            model_name=model_name,
         )
     return store, LlmApi
 
@@ -305,10 +320,9 @@ def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
         chunks = reranker.rerank(question, chunks, top_k=top_k)
         print("done")
 
-    enc = sys.stdout.encoding or "utf-8"
     for i, chunk in enumerate(chunks, 1):
         print(f"\n--- Chunk {i} ---")
-        print(chunk.encode(enc, errors="replace").decode(enc))
+        print(chunk)
 
 
 def _stream_answer(llm, messages: list[dict]) -> str:
@@ -387,12 +401,19 @@ def cmd_build(config: dict, force: bool = False) -> None:
         f"[info] {len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
     )
 
+    store, _ = _init_embed_store(config)
+
+    # Auto full-rebuild when embedding model changed
+    old_model = store.get_meta_model()
+    new_model = _resolve_model_name(config)
+    if old_model and old_model != new_model:
+        print(f"[info] model changed: {old_model} -> {new_model}, forcing full rebuild")
+        force = True
+
     if not force and not _has_file_changes(persist_dir, file_hashes):
         print("[info] no changes detected, skipping")
         print(f"[step] build complete [{time.perf_counter() - t0:.1f}s total]")
         return
-
-    store, _ = _init_embed_store(config)
 
     with _timed("Building vector index"):
         if force:

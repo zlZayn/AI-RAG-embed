@@ -4,7 +4,7 @@
 
 ## Overview
 
-Drop your `.txt`/`.md` files into `documents/`, embed them locally to build the index, then ask questions and get answers from a remote LLM based on your content.
+Drop your `.txt`/`.md`/`.typ` files into `documents/`, embed them locally to build the index, then ask questions and get answers from a remote LLM based on your content.
 
 ## Quick Start
 
@@ -14,9 +14,9 @@ pip install -r requirements.txt
 # 1. Copy config_example.json to config.json and fill in your API key
 cp config_example.json config.json
 
-# 2. Put your .txt / .md files in documents/
+# 2. Put your .txt / .md / .typ files in documents/
 
-# 3. Build the vector index (downloads ~641MB embedding model on first run)
+# 3. Build the vector index (downloads embedding model on first run)
 python rag_qa.py --build
 
 # 4. Ask a question
@@ -45,7 +45,7 @@ python rag_qa.py --build    # incremental: skip if no files changed
 python rag_qa.py --rebuild  # force full re-embed
 ```
 
-`--build` only detects file content changes. If you change `chunking` or `embedding_model_name` in `config.json`, use `--rebuild` to re-embed everything.
+`--build` detects file content changes and embedding model changes. Switching models in `config.json` triggers an automatic full rebuild -- no manual `--rebuild` needed.
 
 ### Interactive Mode
 
@@ -109,11 +109,26 @@ Edit `config.json` to configure the system. Relative paths (`./`) are resolved a
 
 | Key | Description |
 | --- | --- |
-| `docs_dir` | Folder containing your `.txt` / `.md` files (including subfolders). Use `.doc_loader_ignore` to exclude files (`.gitignore` syntax). |
-| `docs_lang` | Language of your documents (e.g., `"en"`, `"zh"`). The enhancer generates output in this language for retrieval. |
+| `docs_dir` | Folder containing your document files (including subfolders). Use `.doc_loader_ignore` to exclude files (`.gitignore` syntax). |
+| `docs_lang` | Language of your documents (`"en"`, `"zh"`, etc.). Controls which embedding model is selected and which query prefix is used. |
 | `chunking` | Chunking config object. Mode-specific keys are listed below. |
-| `embedding_model_name` | HuggingFace model ID for vector embeddings. See notes below. |
+| `embedding_model_name` | Embedding model config. Can be a string (single model) or an object mapping `docs_lang` values to model IDs. See below. |
 | `chroma_persist_dir` | Folder where the vector database is saved. |
+
+**`embedding_model_name`** accepts two formats:
+
+```json
+// Simple: one model for all languages
+"embedding_model_name": "BAAI/bge-small-zh-v1.5"
+
+// Per-language: auto-selected based on docs_lang
+"embedding_model_name": {
+    "zh": "BAAI/bge-small-zh-v1.5",
+    "en": "mixedbread-ai/mxbai-embed-large-v1"
+}
+```
+
+When using the per-language format, changing `docs_lang` automatically switches the model and query prefix. Model dimension changes are handled automatically -- `--build` detects the switch and rebuilds the index from scratch.
 
 ### Chunking (`chunking`)
 
@@ -123,7 +138,7 @@ Controls how documents are split into chunks for embedding.
 | --- | --- |
 | `mode` | `"auto"` (default) = smart splitting. `"fixed"` = fixed-length with separator fallback. |
 
-**Auto mode** (`chunking.auto`): Heading-aware for `.md` files, paragraph-first for `.txt` files. Code blocks and tables are never split.
+**Auto mode** (`chunking.auto`): Heading-aware for `.md` files, paragraph-first for `.txt`/`.typ` files. Code blocks and tables are never split.
 
 | Key | Description |
 | --- | --- |
@@ -139,15 +154,9 @@ Controls how documents are split into chunks for embedding.
 | `max_chars` | Hard limit per chunk. Never exceeded. Default: `700`. |
 | `overlap_chars` | Overlap between adjacent chunks. Default: `70`. |
 
-> **Switching models**: The code has model-specific defaults that may need manual adjustment:
->
-> - **Embedding model**: A query prefix is hardcoded for the mxbai model family. Other models (e.g., `all-MiniLM-L6-v2`) do not use it — leaving it in will hurt retrieval. Check `lib/embed_engine.py` `_QUERY_PREFIX`.
-> - **Translation model**: The local enhancer auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`. To use a different model series, set `model_name` explicitly in `config.json`.
-> - **HuggingFace mirror**: `hf-mirror.com` is set as the default endpoint for users in China. Remove or override `HF_ENDPOINT` if you have direct access to HuggingFace.
-
 ### Query Enhancement (`enhancer`)
 
-Rewrites your question before searching to improve retrieval quality. The enhanced output is used **only for retrieval** — the answer LLM always receives the original question.
+Rewrites your question before searching to improve retrieval quality. The enhanced output is used **only for retrieval** -- the answer LLM always receives the original question.
 
 | Key | Description |
 | --- | --- |
@@ -175,10 +184,11 @@ Rewrites your question before searching to improve retrieval quality. The enhanc
 
 | Key | Description |
 | --- | --- |
+| `bm25_enabled` | Enable BM25 keyword retrieval alongside vector search. Results are merged via Reciprocal Rank Fusion (RRF). Improves exact term matching (e.g., technical names, abbreviations). Default: `false`. |
 | `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
 | `retrieval_distance_threshold` | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in the enhancer config when enhancement is enabled. Set `null` to disable filtering. Default: `0.3`. |
 
-**Reranker** (optional): Two-stage retrieval — vector search retrieves `retrieval_k * 4` candidates, then a cross-encoder reranks by relevance and trims to the final `retrieval_k`. Improves precision where bi-encoder cosine similarity is insufficient.
+**Reranker** (optional): Two-stage retrieval -- vector search retrieves `retrieval_k * 4` candidates, then a cross-encoder reranks by relevance and trims to the final `retrieval_k`. Improves precision where bi-encoder cosine similarity is insufficient.
 
 | Key | Description |
 | --- | --- |
@@ -203,6 +213,12 @@ The LLM that generates the final answer using the retrieved chunks. Fields: `api
 ## Document Filtering
 
 Place a `.doc_loader_ignore` file in any subdirectory under `documents/`. Uses `.gitignore` syntax. Patterns apply to the containing directory and all subdirectories.
+
+```text
+# documents/.doc_loader_ignore
+r4ds_textbook/
+fpp3_textbook/
+```
 
 ```text
 # documents/fpp3_textbook/.doc_loader_ignore
@@ -230,13 +246,14 @@ Each round file contains the question, answer, processed question (labeled "Enha
 rag_qa.py               # entry point (--build | --rebuild | --search | question | interactive)
 config.json             # your configuration (gitignored)
 config_example.json     # configuration template
-documents/              # put your .txt / .md files here
+documents/              # put your .txt / .md / .typ files here
 chroma_db/              # persisted vector database (generated)
 output/                 # conversation exports (generated)
 lib/
 ├── doc_loader.py       # file I/O + text chunking + ignore patterns
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)
-├── vector_db.py        # Chroma vector store operations
+├── vector_db.py        # Chroma vector store + hybrid retrieval
+├── bm25_retriever.py   # BM25 keyword retriever (jieba + rank-bm25)
 ├── llm_api.py          # remote LLM API client (OpenAI-compatible)
 ├── query_enhancer.py   # query enhancement (retrieval-optimized rewriting)
 ├── local_translator.py # MarianMT local translation backend
@@ -249,6 +266,7 @@ lib/
 
 - Python 3.10+
 - `sentence-transformers`, `chromadb`, `openai`, `pathspec` (core)
+- `jieba`, `rank-bm25` (BM25 hybrid retrieval)
 - `transformers`, `sentencepiece`, `sacremoses` (only needed for `mode: "local"`)
 
 ### GPU Setup (Optional)

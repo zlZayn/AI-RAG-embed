@@ -393,7 +393,7 @@ def load_documents(docs_dir: str, config: dict) -> tuple[list[dict], dict]:
         for filename in files:
             if filename == _IGNORE_FILE:
                 continue
-            if not filename.endswith((".txt", ".md")):
+            if not filename.endswith((".txt", ".md", ".typ")):
                 continue
 
             filepath = os.path.join(root, filename)
