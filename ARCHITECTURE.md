@@ -2,9 +2,15 @@
 
 ## Design Philosophy
 
-Most RAG systems embed the user's raw question directly into the vector space and hope the embedding model bridges the gap. It often doesn't. A question like "ARIMA 怎么选参数?" is concise and natural for a human, but a poor match for document chunks that discuss "order determination via AIC/BIC criteria" and "automated model selection with auto_arima." The embedding model may bridge the semantic gap, or it may not — and when it fails, the user gets irrelevant chunks with no obvious way to fix it.
+RAG fails at two boundaries: how you cut, and how you ask. Everything else is compounding marginal gains on top.
 
-In the AI era, calling an LLM as a thin middleware layer costs almost nothing but returns disproportionately. The enhancer rewrites the user's question into a dense retrieval paragraph optimized for vector similarity matching. The rewritten query is used only for retrieval; the answer LLM always receives the original question.
+**Chunking.** Bad chunks — split mid-sentence, mid-table, mid-thought — are irrecoverable. No embedding model can represent what was never coherent. Structural awareness (heading boundaries, atomic tables, code blocks) ensures each chunk carries a complete idea.
+
+**Retrieval.** Vector search alone is a single point of failure. BM25 keyword matching catches exact terms that embeddings miss (technical names, abbreviations, proper nouns). Cross-encoder reranking rescues precision when cosine similarity is insufficient. Multiple retrieval signals fused together are more robust than any one alone.
+
+**Queries.** Terse, ambiguous questions using different vocabulary than the documents retrieve the wrong chunks even when the right ones exist. The enhancer rewrites the question into a dense retrieval paragraph optimized for vector similarity. It is used only for retrieval; the answer LLM always receives the original question.
+
+Each layer addresses a distinct failure mode. No single layer is sufficient; together they close the gap between what the user means and what the system can find.
 
 ## Overview
 
