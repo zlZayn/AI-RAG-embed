@@ -15,11 +15,11 @@ UNIT_CODE = "code"
 UNIT_TABLE = "table"
 
 # Markdown-specific patterns
-MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
-MD_TABLE_ROW_RE = re.compile(r"^\|.+\||.+\|.+\|")
+MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+MARKDOWN_TABLE_ROW_RE = re.compile(r"^\|.+\||.+\|.+\|")
 
 # Typst-specific patterns
-TY_HEADING_RE = re.compile(r"^(=+)\s+(.+)$")
+TYPST_HEADING_RE = re.compile(r"^(=+)\s+(.+)$")
 
 # Shared
 CODE_FENCE = "```"
@@ -194,7 +194,7 @@ def _extract_code_block(lines: list[str], start: int) -> tuple[str, int]:
     return content, end
 
 
-def _extract_md_table(lines: list[str], start: int) -> tuple[str, int]:
+def _extract_markdown_table(lines: list[str], start: int) -> tuple[str, int]:
     """Extract Markdown pipe table starting at lines[start]. Returns (content, end_index)."""
     end = start
     while end < len(lines):
@@ -206,7 +206,7 @@ def _extract_md_table(lines: list[str], start: int) -> tuple[str, int]:
     return content, end
 
 
-def _extract_md_paragraph(lines: list[str], start: int) -> tuple[str, int]:
+def _extract_markdown_paragraph(lines: list[str], start: int) -> tuple[str, int]:
     """Extract Markdown paragraph starting at lines[start]. Returns (content, end_index)."""
     end = start
     while end < len(lines):
@@ -215,9 +215,9 @@ def _extract_md_paragraph(lines: list[str], start: int) -> tuple[str, int]:
             break
         # Stop if we hit a heading, code fence, or table row
         if (
-            MD_HEADING_RE.match(line)
+            MARKDOWN_HEADING_RE.match(line)
             or line.startswith(CODE_FENCE)
-            or MD_TABLE_ROW_RE.match(line)
+            or MARKDOWN_TABLE_ROW_RE.match(line)
         ):
             break
         end += 1
@@ -242,7 +242,7 @@ def _parse_markdown(text: str) -> list[dict]:
             continue
 
         # 2. Heading
-        match = MD_HEADING_RE.match(line)
+        match = MARKDOWN_HEADING_RE.match(line)
         if match:
             level = len(match.group(1))
             content = match.group(2).strip()
@@ -251,15 +251,15 @@ def _parse_markdown(text: str) -> list[dict]:
             continue
 
         # 3. Table
-        if MD_TABLE_ROW_RE.match(line):
-            content, end = _extract_md_table(lines, i)
+        if MARKDOWN_TABLE_ROW_RE.match(line):
+            content, end = _extract_markdown_table(lines, i)
             units.append({"type": UNIT_TABLE, "content": content})
             i = end
             continue
 
         # 4. Paragraph
         if line.strip():
-            content, end = _extract_md_paragraph(lines, i)
+            content, end = _extract_markdown_paragraph(lines, i)
             units.append({"type": UNIT_PARAGRAPH, "content": content})
             i = end
             continue
@@ -388,7 +388,7 @@ def _load_markdown(text: str, cfg: dict, source: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _extract_balanced_paren(lines: list[str], start: int) -> tuple[int, int]:
+def _extract_typst_balanced_paren(lines: list[str], start: int) -> tuple[int, int]:
     """Skip () parameter block starting at lines[start]. Returns (end_line, end_col)."""
     depth = 0
     for i in range(start, len(lines)):
@@ -402,7 +402,7 @@ def _extract_balanced_paren(lines: list[str], start: int) -> tuple[int, int]:
     return len(lines) - 1, len(lines[-1])
 
 
-def _extract_balanced_block(
+def _extract_typst_balanced_block(
     lines: list[str], start: int, open_ch: str, close_ch: str
 ) -> tuple[str, int]:
     """Extract a balanced bracket/paren block. Returns (content, end_line)."""
@@ -418,7 +418,7 @@ def _extract_balanced_block(
     return "\n".join(lines[start:]), len(lines)
 
 
-def _extract_ty_paragraph(lines: list[str], start: int) -> tuple[str, int]:
+def _extract_typst_paragraph(lines: list[str], start: int) -> tuple[str, int]:
     """Extract Typst paragraph starting at lines[start]. Returns (content, end_index)."""
     end = start
     while end < len(lines):
@@ -426,7 +426,7 @@ def _extract_ty_paragraph(lines: list[str], start: int) -> tuple[str, int]:
         if not line:
             break
         if (
-            TY_HEADING_RE.match(line)
+            TYPST_HEADING_RE.match(line)
             or line.startswith(CODE_FENCE)
             or re.match(r"\s*#(figure|table)\s*\(", line)
             or re.match(r"\s*#quote\s*\(", line)
@@ -444,7 +444,7 @@ def _parse_typst(text: str) -> list[dict]:
 
     # Skip preamble: everything before the first "= " heading
     while i < len(lines):
-        if TY_HEADING_RE.match(lines[i]):
+        if TYPST_HEADING_RE.match(lines[i]):
             break
         i += 1
 
@@ -459,7 +459,7 @@ def _parse_typst(text: str) -> list[dict]:
             continue
 
         # Heading: = ... ======
-        match = TY_HEADING_RE.match(line)
+        match = TYPST_HEADING_RE.match(line)
         if match:
             level = len(match.group(1))
             content = match.group(2).strip()
@@ -469,21 +469,21 @@ def _parse_typst(text: str) -> list[dict]:
 
         # Table: #figure( or #table(
         if re.match(r"\s*#(figure|table)\s*\(", line):
-            content, end = _extract_balanced_block(lines, i, "(", ")")
+            content, end = _extract_typst_balanced_block(lines, i, "(", ")")
             units.append({"type": UNIT_TABLE, "content": content})
             i = end
             continue
 
         # Quote: #quote(...) — skip () params, then extract [] content
         if re.match(r"\s*#quote\s*\(", line):
-            end_line, end_col = _extract_balanced_paren(lines, i)
+            end_line, end_col = _extract_typst_balanced_paren(lines, i)
             remaining = lines[end_line][end_col:]
             if "[" in remaining:
                 bracket_start = end_line
             else:
                 bracket_start = end_line + 1
             if bracket_start < len(lines):
-                content, end = _extract_balanced_block(lines, bracket_start, "[", "]")
+                content, end = _extract_typst_balanced_block(lines, bracket_start, "[", "]")
             else:
                 content, end = "", bracket_start
             units.append({"type": UNIT_PARAGRAPH, "content": content})
@@ -502,7 +502,7 @@ def _parse_typst(text: str) -> list[dict]:
 
         # Paragraph
         if line.strip():
-            content, end = _extract_ty_paragraph(lines, i)
+            content, end = _extract_typst_paragraph(lines, i)
             units.append({"type": UNIT_PARAGRAPH, "content": content})
             i = end
             continue
