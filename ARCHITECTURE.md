@@ -99,9 +99,13 @@ Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--st
 
 Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing `chunking` requires a full `--rebuild`; changing `embedding_model_name` is auto-detected by `--build` and triggers a full rebuild automatically.
 
-Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_retrieval()`. `cmd_search` and `cmd_build` call `_init_retrieval()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it forces a full rebuild before checking file hashes.
+Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded. `_init_retrieval()` imports `chromadb` and `openai` unconditionally, but imports `sentence-transformers` (and its `torch` dependency) only when `vector_enabled=true`. In BM25-only mode, the ~12s torch import is skipped entirely. `cmd_ask` and `cmd_chat` call `_init_retrieval()` through `_init_ask_chat()`. `cmd_search` and `cmd_build` call `_init_retrieval()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it forces a full rebuild before checking file hashes.
 
 Progress messages use the `_timed(label)` context manager for consistent `[step] {label}... done [Xs]` formatting.
+
+### _init_enhancer(config)
+
+Shared helper that initializes the query enhancer from config. Returns `(enhancer, threshold)` tuple — `(None, None)` if `query_enhance_enabled` is `false`. The `threshold` is the per-mode `distance_threshold` from the active enhancer config (local or llm). Used by both `cmd_search(use_enhancer=True)` and `_init_ask_chat()`. Callers use the enhancer threshold when available, falling back to the global `retrieval_distance_threshold`.
 
 ## Build Workflow
 
@@ -220,19 +224,6 @@ The answer LLM always receives the **original question** to preserve the user's 
 
 If no relevant chunks are found, the system prints a message and skips the round.
 
-### _init_enhancer(config)
-
-Shared helper that initializes the query enhancer from config. Returns `(enhancer, threshold)` tuple — `(None, None)` if `query_enhance_enabled` is `false`. The `threshold` is the per-mode `distance_threshold` from the active enhancer config (local or llm). Used by both `cmd_search(use_enhancer=True)` and `_init_ask_chat()`. Callers use the enhancer threshold when available, falling back to the global `retrieval_distance_threshold`.
-
-### Chunk Sanitization
-
-Retrieved chunks are sanitized before wrapping to prevent Markdown rendering corruption:
-
-1. `strip("`")` -- removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
-2. `replace("```", "``")` -- reduces any remaining triple-backtick to double-backtick (prevents premature fence closure).
-
-After sanitization, the context block is wrapped in a standard 3-backtick fence with `text` info string.
-
 ## System Prompt
 
 Two modes controlled by `strict_context`:
@@ -245,6 +236,15 @@ Two modes controlled by `strict_context`:
 
 If `system_rules` is set, it is appended after the base prompt.
 
+## Chunk Sanitization
+
+Retrieved chunks are sanitized before wrapping to prevent Markdown rendering corruption:
+
+1. `strip("`")` -- removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
+2. `replace("```", "``")` -- reduces any remaining triple-backtick to double-backtick (prevents premature fence closure).
+
+After sanitization, the context block is wrapped in a standard 3-backtick fence with `text` info string.
+
 ## Output Export
 
 After each Q&A round, the output file is written in three stages:
@@ -253,7 +253,7 @@ After each Q&A round, the output file is written in three stages:
 2. `_stream_answer()` streams the answer token-by-token to both console and file simultaneously
 3. `_write_round_context()` appends the retrieved chunks
 
-The answer is written in real-time as it is generated. If interrupted (Ctrl+C), the file preserves the question and whatever portion of the answer was completed.
+While waiting for the first token, `[generating]...` is displayed on the console and written to the output file as a placeholder. Once the first token arrives, the console placeholder is cleared via ANSI escape, and the file placeholder is removed by closing the file, stripping `[generating]...` via regex (`_remove_placeholder`), and reopening for append. Subsequent tokens are written in real-time. If interrupted (Ctrl+C), the file preserves the question and whatever portion of the answer was completed.
 
 ```text
 output/<sanitized_question>_<YYYYMMDD_HHMMSS>/

@@ -38,14 +38,20 @@ def _resolve_model_name(config: dict) -> str:
 
 
 def _init_retrieval(config: dict):
-    with _timed("Importing modules"):
-        EmbedEngine, LlmApi, VectorDb = _import_lib()
+    from lib.llm_api import LlmApi
+    from lib.vector_db import VectorDb
+
     vector_enabled = config.get("vector_enabled", True)
     bm25_enabled = config.get("bm25_enabled", False)
 
     if not vector_enabled and not bm25_enabled:
         print("[error] At least one of vector_enabled or bm25_enabled must be true.")
         raise SystemExit(1)
+
+    EmbedEngine = None
+    if vector_enabled:
+        with _timed("Importing modules"):
+            from lib.embed_engine import EmbedEngine
 
     model_name = _resolve_model_name(config) if vector_enabled else ""
     embed_engine = None
@@ -363,7 +369,18 @@ def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
 
 def _stream_answer(llm, messages: list[dict], file=None) -> str:
     answer = ""
+    print("[generating]...", end="", flush=True)
+    if file:
+        file.write("[generating]...")
+        file.flush()
     for token in llm.generate_stream(messages):
+        if not answer:
+            print("\r\033[K", end="", flush=True)
+            if file:
+                filepath = file.name
+                file.close()
+                _remove_placeholder(filepath)
+                file = open(filepath, "a", encoding="utf-8")
         print(token, end="", flush=True)
         answer += token
         if file:
@@ -371,6 +388,14 @@ def _stream_answer(llm, messages: list[dict], file=None) -> str:
             file.flush()
     print()
     return answer
+
+
+def _remove_placeholder(filepath: str) -> None:
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    cleaned = re.sub(r"\[generating]\.\.\.", "", content)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(cleaned)
 
 
 def cmd_ask(config: dict, question: str, use_enhancer: bool = False) -> None:
@@ -404,8 +429,8 @@ def cmd_ask(config: dict, question: str, use_enhancer: bool = False) -> None:
     filepath = os.path.join(out_dir, "01_round.md")
 
     _write_round_header(filepath, 1, question, rewritten_question, enhance_label)
-    with open(filepath, "a", encoding="utf-8") as f:
-        _stream_answer(llm, messages, file=f)
+    f = open(filepath, "a", encoding="utf-8")
+    _stream_answer(llm, messages, file=f)
 
     _write_round_context(filepath, chunks)
     print(f"\n[info] saved to {out_dir}")
@@ -522,8 +547,8 @@ def cmd_chat(config: dict) -> None:
         _write_round_header(
             filepath, round_index, question, rewritten_question, enhance_label
         )
-        with open(filepath, "a", encoding="utf-8") as f:
-            answer = _stream_answer(llm, messages, file=f)
+        f = open(filepath, "a", encoding="utf-8")
+        answer = _stream_answer(llm, messages, file=f)
 
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
