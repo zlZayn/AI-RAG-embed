@@ -247,7 +247,13 @@ If `system_rules` is set, it is appended after the base prompt.
 
 ## Output Export
 
-After each Q&A round, `_export_round()` writes a Markdown file:
+After each Q&A round, the output file is written in three stages:
+
+1. `_write_round_header()` writes the Round title, Question, and Enhanced/Translated Question
+2. `_stream_answer()` streams the answer token-by-token to both console and file simultaneously
+3. `_write_round_context()` appends the retrieved chunks
+
+The answer is written in real-time as it is generated. If interrupted (Ctrl+C), the file preserves the question and whatever portion of the answer was completed.
 
 ```text
 output/<sanitized_question>_<YYYYMMDD_HHMMSS>/
@@ -304,7 +310,7 @@ load_documents(docs_dir, config) -> (list[dict], dict[str, str])
 **auto mode** (default, `chunking.auto`):
 
 - `.md` files: parses Markdown into structural units (headings, paragraphs, code blocks, tables), groups by heading level (`split_at_level`), then merges within sections. Code blocks and tables are atomic — never split even if they exceed `target_chars`.
-- `.typ` files: parses Typst into structural units (headings via `= `, tables via `#figure`/`#table`, blockquotes via `#quote`, code blocks, paragraphs). Skips preamble (`#set`/`#show`/`#let`), comments (`//`), and non-content elements. Groups by heading level, same as Markdown. Code blocks and tables are atomic.
+- `.typ` files: parses Typst into structural units (headings via `=`, tables via `#figure`/`#table`, blockquotes via `#quote`, code blocks, paragraphs). Skips preamble (`#set`/`#show`/`#let`), comments (`//`), and non-content elements. Groups by heading level, same as Markdown. Code blocks and tables are atomic.
 - `.txt` files: splits on paragraph boundaries (`\n\n`, falls back to `\n`). Paragraphs are never cut — a paragraph either fits into the current chunk or starts a new one.
 - `target_chars`: target chunk size. Atomic units (code blocks, tables) may exceed this. Default: `700`.
 - `min_chars`: sections shorter than this are dropped as noise.

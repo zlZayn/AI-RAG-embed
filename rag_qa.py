@@ -132,6 +132,31 @@ def _sanitize_chunk(text: str) -> str:
     return text
 
 
+def _write_round_header(
+    filepath: str,
+    index: int,
+    question: str,
+    rewritten_question: str | None = None,
+    enhance_label: str = "Enhanced Question",
+) -> None:
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(f"========== *Round {index}* ==========\n\n")
+        f.write(f"**Question:**\n\n```text\n{question}\n```\n\n")
+        if rewritten_question and rewritten_question != question:
+            f.write(f"**{enhance_label}:**\n\n```text\n{rewritten_question}\n```\n\n")
+        f.write("**Answer:**\n\n")
+
+
+def _write_round_context(
+    filepath: str,
+    chunks: list[str],
+) -> None:
+    safe_chunks = [_sanitize_chunk(c) for c in chunks]
+    context_blocks = "\n\n".join(f"```text\n{c}\n```" for c in safe_chunks)
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(f"\n\n========== *Retrieved Context* ==========\n\n{context_blocks}\n")
+
+
 def _export_round(
     out_dir: str,
     index: int,
@@ -336,11 +361,14 @@ def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
         print(chunk)
 
 
-def _stream_answer(llm, messages: list[dict]) -> str:
+def _stream_answer(llm, messages: list[dict], file=None) -> str:
     answer = ""
     for token in llm.generate_stream(messages):
         print(token, end="", flush=True)
         answer += token
+        if file:
+            file.write(token)
+            file.flush()
     print()
     return answer
 
@@ -372,12 +400,14 @@ def cmd_ask(config: dict, question: str, use_enhancer: bool = False) -> None:
     if not chunks:
         return
 
-    answer = _stream_answer(llm, messages)
-
     out_dir = _init_output_dir(question)
-    _export_round(
-        out_dir, 1, question, chunks, answer, rewritten_question, enhance_label
-    )
+    filepath = os.path.join(out_dir, "01_round.md")
+
+    _write_round_header(filepath, 1, question, rewritten_question, enhance_label)
+    with open(filepath, "a", encoding="utf-8") as f:
+        _stream_answer(llm, messages, file=f)
+
+    _write_round_context(filepath, chunks)
     print(f"\n[info] saved to {out_dir}")
 
 
@@ -485,23 +515,20 @@ def cmd_chat(config: dict) -> None:
         if not chunks:
             continue
 
-        answer = _stream_answer(llm, messages)
+        if out_dir is None:
+            out_dir = _init_output_dir(question)
+        round_index += 1
+        filepath = os.path.join(out_dir, f"{round_index:02d}_round.md")
+        _write_round_header(
+            filepath, round_index, question, rewritten_question, enhance_label
+        )
+        with open(filepath, "a", encoding="utf-8") as f:
+            answer = _stream_answer(llm, messages, file=f)
 
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
 
-        if out_dir is None:
-            out_dir = _init_output_dir(question)
-        round_index += 1
-        _export_round(
-            out_dir,
-            round_index,
-            question,
-            chunks,
-            answer,
-            rewritten_question,
-            enhance_label,
-        )
+        _write_round_context(filepath, chunks)
 
 
 def main() -> None:
