@@ -147,12 +147,18 @@ Controls how documents are split into chunks for embedding.
 | `min_chars` | Minimum characters per chunk. Shorter sections are dropped. Default: `100`. |
 | `include_heading` | Prepend section heading to each chunk (as `> heading`). Default: `false`. |
 
-**Fixed mode** (`chunking.fixed`): Splits at `max_chars` (hard ceiling), falling back to the best separator by priority (`\n\n` > `\n` > punctuation > space).
+**Fixed mode** (`chunking.fixed`): Two sub-modes controlled by `split_by`:
+
+- `"char"` (default): splits at `max_chars` (hard ceiling), falling back to the best separator by priority (`\n\n` > `\n` > punctuation > space). `overlap_chars` controls adjacent chunk overlap.
+- `"line"`: splits by line count (`max_lines`), preserving complete line boundaries. Prefers blank lines (paragraph breaks) as split points. `overlap_lines` controls adjacent chunk overlap.
 
 | Key | Description |
 | --- | --- |
-| `max_chars` | Hard limit per chunk. Never exceeded. Default: `700`. |
-| `overlap_chars` | Overlap between adjacent chunks. Default: `70`. |
+| `split_by` | `"char"` (default) = split by character count. `"line"` = split by line count. |
+| `char.max_chars` | Hard limit per chunk (char mode). Default: `700`. |
+| `char.overlap_chars` | Overlap between adjacent chunks (char mode). Default: `70`. |
+| `line.max_lines` | Max lines per chunk (line mode). Default: `20`. |
+| `line.overlap_lines` | Overlap in lines between adjacent chunks (line mode). Default: `3`. |
 
 ### Query Enhancement (`enhancer`)
 
@@ -184,9 +190,19 @@ Rewrites your question before searching to improve retrieval quality. The enhanc
 
 | Key | Description |
 | --- | --- |
-| `bm25_enabled` | Enable BM25 keyword retrieval alongside vector search. Results are merged via Reciprocal Rank Fusion (RRF). Improves exact term matching (e.g., technical names, abbreviations). Default: `false`. |
+| `vector_enabled` | Enable vector (embedding) retrieval. When `false`, the embedding model is not loaded — faster startup, lower memory. Default: `true`. |
+| `bm25_enabled` | Enable BM25 keyword retrieval. Can be used alone or combined with vector search; combined results are merged via Reciprocal Rank Fusion (RRF). Default: `false`. |
 | `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
-| `retrieval_distance_threshold` | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in the enhancer config when enhancement is enabled. Set `null` to disable filtering. Default: `0.3`. |
+| `retrieval_distance_threshold` | Cosine distance threshold for vector retrieval. Chunks with distance above this value are filtered out. Only effective when `vector_enabled` is `true`. Overridden by per-mode `distance_threshold` in the enhancer config when enhancement is enabled. Set `null` to disable filtering. Default: `0.3`. |
+
+At least one of `vector_enabled` or `bm25_enabled` must be `true`. The four combinations:
+
+| `vector_enabled` | `bm25_enabled` | Behavior |
+| --- | --- | --- |
+| `true` | `true` | Hybrid: vector + BM25, merged via RRF |
+| `true` | `false` | Vector-only retrieval |
+| `false` | `true` | BM25-only retrieval (no embedding model loaded) |
+| `false` | `false` | Error: at least one must be enabled |
 
 **Reranker** (optional): Two-stage retrieval -- vector search retrieves `retrieval_k * 4` candidates, then a cross-encoder reranks by relevance and trims to the final `retrieval_k`. Improves precision where bi-encoder cosine similarity is insufficient.
 

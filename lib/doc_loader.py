@@ -67,12 +67,54 @@ def _parse_chunking_config(config: dict) -> dict:
     shared_max = raw.get("max_chars")
 
     auto_cfg = raw.get("auto", {})
-    fixed_cfg = raw.get("fixed", {})
+    fixed_raw = raw.get("fixed", {})
+
+    # --- auto mode ---
+    auto_target = auto_cfg.get("target_chars", shared_max or 700)
+
+    # --- fixed mode: determine split_by ---
+    split_by = fixed_raw.get("split_by")
+    if split_by is None:
+        split_by = "char"
+    if split_by not in ("char", "line"):
+        raise ValueError(f"Invalid split_by: '{split_by}'. Must be 'char' or 'line'.")
+
+    # fixed char params: new sub-object > old flat keys > top-level fallback
+    if "char" in fixed_raw:
+        char_cfg = fixed_raw["char"]
+        char_max = char_cfg.get("max_chars", shared_max or 700)
+        char_overlap = char_cfg.get("overlap_chars", 70)
+    else:
+        char_max = fixed_raw.get("max_chars", shared_max or 700)
+        char_overlap = fixed_raw.get("overlap_chars", 70)
+
+    # fixed line params
+    line_cfg = fixed_raw.get("line", {})
+    line_max = line_cfg.get("max_lines", 20)
+    line_overlap = line_cfg.get("overlap_lines", 3)
+
+    # --- validation ---
+    if char_max <= 0:
+        raise ValueError(f"max_chars must be positive, got {char_max}")
+    if char_overlap < 0:
+        raise ValueError(f"overlap_chars must be non-negative, got {char_overlap}")
+    if char_overlap >= char_max:
+        raise ValueError(
+            f"overlap_chars ({char_overlap}) must be < max_chars ({char_max})"
+        )
+    if line_max <= 0:
+        raise ValueError(f"max_lines must be positive, got {line_max}")
+    if line_overlap < 0:
+        raise ValueError(f"overlap_lines must be non-negative, got {line_overlap}")
+    if line_overlap >= line_max:
+        raise ValueError(
+            f"overlap_lines ({line_overlap}) must be < max_lines ({line_max})"
+        )
 
     if mode == "auto":
-        max_chars = auto_cfg.get("target_chars", shared_max or 700)
+        max_chars = auto_target
     else:
-        max_chars = fixed_cfg.get("max_chars", shared_max or 700)
+        max_chars = char_max
 
     if max_chars <= 0:
         raise ValueError(f"max_chars must be positive, got {max_chars}")
@@ -85,14 +127,21 @@ def _parse_chunking_config(config: dict) -> dict:
         "mode": mode,
         "max_chars": max_chars,
         "auto": {
-            "target_chars": auto_cfg.get("target_chars", shared_max or 700),
+            "target_chars": auto_target,
             "split_at_level": split_at_level,
             "min_chars": auto_cfg.get("min_chars", 100),
             "include_heading": auto_cfg.get("include_heading", False),
         },
         "fixed": {
-            "max_chars": fixed_cfg.get("max_chars", shared_max or 700),
-            "overlap_chars": fixed_cfg.get("overlap_chars", 70),
+            "split_by": split_by,
+            "char": {
+                "max_chars": char_max,
+                "overlap_chars": char_overlap,
+            },
+            "line": {
+                "max_lines": line_max,
+                "overlap_lines": line_overlap,
+            },
         },
     }
 
@@ -111,8 +160,10 @@ def _find_break(text: str, end: int, min_end: int) -> int:
     return end
 
 
-def _load_fixed(text: str, source: str, max_chars: int, overlap: int) -> list[dict]:
-    """Fixed-length chunking with separator-priority fallback."""
+def _load_fixed_by_chars(
+    text: str, source: str, max_chars: int, overlap_chars: int
+) -> list[dict]:
+    """Fixed-length chunking by character count with separator-priority fallback."""
     chunks = []
     start = 0
 
@@ -128,7 +179,61 @@ def _load_fixed(text: str, source: str, max_chars: int, overlap: int) -> list[di
         chunks.append({"text": chunk_text, "source": source})
         if end >= len(text):
             break
-        start = end - overlap
+        start = end - overlap_chars
+
+    return chunks
+
+
+def _load_fixed_by_lines(
+    text: str, source: str, max_lines: int, overlap_lines: int
+) -> list[dict]:
+    """Fixed-length chunking by line count. Lines are never split."""
+    if not text.strip():
+        return []
+
+    lines = text.split("\n")
+
+    if len(lines) <= max_lines:
+        return [{"text": text, "source": source}]
+
+    chunks = []
+    start = 0
+
+    while start < len(lines):
+        window_end = min(start + max_lines, len(lines))
+
+        # Try to find a better break point in the second half of the window
+        search_start = start + max_lines // 2
+        break_idx = None
+
+        # Priority 1: blank line (paragraph boundary)
+        for i in range(window_end - 1, search_start - 1, -1):
+            if lines[i].strip() == "":
+                break_idx = i + 1
+                break
+
+        # Priority 2: punctuation-only line
+        if break_idx is None:
+            for i in range(window_end - 1, search_start - 1, -1):
+                stripped = lines[i].strip()
+                if stripped and all(
+                    c in "。！？.!?—-=*#~" or c.isspace() for c in stripped
+                ):
+                    break_idx = i + 1
+                    break
+
+        # Fallback: hard cut at window boundary
+        if break_idx is None:
+            break_idx = window_end
+
+        chunk_text = "\n".join(lines[start:break_idx])
+        chunks.append({"text": chunk_text, "source": source})
+
+        if break_idx >= len(lines):
+            break
+        start = break_idx - overlap_lines
+        if start < 0:
+            start = 0
 
     return chunks
 
@@ -483,7 +588,9 @@ def _parse_typst(text: str) -> list[dict]:
             else:
                 bracket_start = end_line + 1
             if bracket_start < len(lines):
-                content, end = _extract_typst_balanced_block(lines, bracket_start, "[", "]")
+                content, end = _extract_typst_balanced_block(
+                    lines, bracket_start, "[", "]"
+                )
             else:
                 content, end = "", bracket_start
             units.append({"type": UNIT_PARAGRAPH, "content": content})
@@ -566,12 +673,21 @@ def load_documents(docs_dir: str, config: dict) -> tuple[list[dict], dict]:
             file_hashes[relative_path] = hashlib.md5(text.encode("utf-8")).hexdigest()
 
             if cfg["mode"] == "fixed":
-                file_chunks = _load_fixed(
-                    text,
-                    relative_path,
-                    cfg["max_chars"],
-                    cfg["fixed"]["overlap_chars"],
-                )
+                fixed_cfg = cfg["fixed"]
+                if fixed_cfg["split_by"] == "line":
+                    file_chunks = _load_fixed_by_lines(
+                        text,
+                        relative_path,
+                        fixed_cfg["line"]["max_lines"],
+                        fixed_cfg["line"]["overlap_lines"],
+                    )
+                else:
+                    file_chunks = _load_fixed_by_chars(
+                        text,
+                        relative_path,
+                        fixed_cfg["char"]["max_chars"],
+                        fixed_cfg["char"]["overlap_chars"],
+                    )
             elif filename.endswith(".md"):
                 file_chunks = _load_markdown(text, cfg, source=relative_path)
             elif filename.endswith(".typ"):

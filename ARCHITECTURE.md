@@ -63,14 +63,15 @@ lib/
 | --- | --- | --- |
 | `docs_dir` | Indexing | Source document directory |
 | `docs_lang` | Indexing | Document language (`"en"`, `"zh"`, etc.). Controls embedding model selection and query prefix. |
-| `chunking` | Indexing | Chunking config: `mode` (`"auto"` / `"fixed"`), plus mode-specific sub-keys (`auto.target_chars`, `fixed.max_chars`). See `config_example.json`. |
+| `chunking` | Indexing | Chunking config: `mode` (`"auto"` / `"fixed"`), plus mode-specific sub-keys (`auto.target_chars`, `fixed.split_by`, `fixed.char`, `fixed.line`). See `config_example.json`. |
 | `embedding_model_name` | Indexing | Embedding model config. String (single model) or object mapping `docs_lang` values to model IDs (e.g., `{"zh": "...", "en": "..."}`). Auto-selected by `docs_lang`. |
 | `chroma_persist_dir` | Indexing | Chroma persistence directory |
 | `query_enhance_enabled` | Enhancement | Enable query enhancement (Default: `false`) |
 | `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (retrieval-optimized paragraph) or `"local"` (MarianMT translation). Each mode has its own `distance_threshold`. |
-| `bm25_enabled` | Retrieval | Enable BM25 keyword retrieval alongside vector search. Results merged via Reciprocal Rank Fusion (RRF). Improves exact term matching (Default: `false`) |
+| `vector_enabled` | Retrieval | Enable vector (embedding) retrieval. When `false`, the embedding model is not loaded. Default: `true` |
+| `bm25_enabled` | Retrieval | Enable BM25 keyword retrieval. Can be used alone or combined with vector search; combined results merged via RRF. At least one of `vector_enabled` or `bm25_enabled` must be `true`. Default: `false` |
 | `retrieval_k` | Retrieval | Number of chunks to retrieve (Default: `3`) |
-| `retrieval_distance_threshold` | Retrieval | Global fallback cosine distance threshold. Overridden by per-mode `distance_threshold` in enhancer config when enhancement is enabled. `null` disables filtering (Default: `0.3`) |
+| `retrieval_distance_threshold` | Retrieval | Cosine distance threshold for vector retrieval. Only effective when `vector_enabled` is `true`. Overridden by per-mode `distance_threshold` in enhancer config when enhancement is enabled. `null` disables filtering (Default: `0.3`) |
 | `reranker_enabled` | Retrieval | Enable cross-encoder reranker for precision re-ranking (Default: `false`) |
 | `reranker` | Retrieval | Reranker config: `model_name` (Default: `"BAAI/bge-reranker-v2-m3"`), `top_k` (Default: `null`, uses `retrieval_k`) |
 | `llm` | Generation | LLM model config (api_base_url, api_key, model, temperature (Default: `0.3`), thinking_mode) |
@@ -98,7 +99,7 @@ Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--st
 
 Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing `chunking` requires a full `--rebuild`; changing `embedding_model_name` is auto-detected by `--build` and triggers a full rebuild automatically.
 
-Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_embed_store()`. `cmd_search` and `cmd_build` call `_init_embed_store()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it forces a full rebuild before checking file hashes.
+Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded via `_import_lib()`. `cmd_ask` and `cmd_chat` call it through `_init_ask_chat()`, which delegates embedding+vector-store init to `_init_retrieval()`. `cmd_search` and `cmd_build` call `_init_retrieval()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it forces a full rebuild before checking file hashes.
 
 Progress messages use the `_timed(label)` context manager for consistent `[step] {label}... done [Xs]` formatting.
 
@@ -115,21 +116,23 @@ cmd_build()
 │       chunks: [{"text": str, "source": "relative/path"}, ...]
 │       file_hashes: {"relative/path": "md5hex", ...}
 │
-├─► _init_embed_store(config)
-│   ├─ _resolve_model_name(config)  →  model name (resolves nested per-lang config)
-│   ├─ _import_lib()  →  EmbedEngine, LlmApi, VectorDb
-│   ├─ embed_engine.EmbedEngine(model_name, lang=docs_lang)
-│   │   └─ SentenceTransformer(model_name)
-│   └─ vector_db.VectorDb(persist_dir, embed_engine, bm25_enabled, model_name)
+├─► _init_retrieval(config)
+│   ├─ if vector_enabled:
+│   │   ├─ _resolve_model_name(config)  →  model name (resolves nested per-lang config)
+│   │   ├─ embed_engine.EmbedEngine(model_name, lang=docs_lang)
+│   │   │   └─ SentenceTransformer(model_name)
+│   │   └─ vector_db.VectorDb(persist_dir, embed_engine, vector_enabled, bm25_enabled, model_name)
+│   └─ if vector_enabled=false (BM25-only):
+│       └─ vector_db.VectorDb(persist_dir, embed_engine=None, vector_enabled=false, bm25_enabled=true, model_name="")
 │
-├─► model change detection
+├─► model change detection (only if vector_enabled)
 │   ├─ store.get_meta_model()  →  old model from build_meta.json._model
 │   ├─ _resolve_model_name(config)  →  new model from config
 │   └─ if different → print "[info] model changed: ... -> ..., forcing full rebuild", force=True
 │
-├─► _has_file_changes(persist_dir, file_hashes)  (skipped if force=True)
-│   ├─ read build_meta.json directly (json.load, no heavy imports)
-│   ├─ compare keys + hash values
+├─► store.has_changes(file_hashes)  (skipped if force=True)
+│   ├─ vector mode: compare build_meta.json keys + hash values
+│   ├─ BM25-only mode: compare bm25_store.json file_hashes
 │   └─ if no changes → print "[info] no changes detected, skipping", return early
 │
 └─► store.rebuild / store.rebuild_full
@@ -143,19 +146,19 @@ Change detection compares both the embedding model name (stored as `_model` in `
 
 `rebuild()` performs incremental updates by comparing file content hashes stored in `build_meta.json`. Only changed, added, or removed files are re-embedded. `rebuild_full()` deletes the entire Chroma collection and recreates it (to handle embedding dimension changes), then re-embeds all chunks.
 
-When `bm25_enabled` is true, both `rebuild()` and `rebuild_full()` sync the BM25 keyword index after updating the vector store.
+When `bm25_enabled` is true, both `rebuild()` and `rebuild_full()` sync the BM25 keyword index after updating the vector store. In BM25-only mode (`vector_enabled=false`), the BM25 data is persisted to `bm25_store.json` instead of ChromaDB.
 
 ## Query Workflow
 
 Both `cmd_ask` and `cmd_chat` share `_init_ask_chat()` for engine initialization and `_retrieve_context()` for retrieval.
 `cmd_chat` additionally maintains a `history` list across rounds, truncated to the last `max_history_rounds` rounds (default: 10), and passes it for context-aware enhancement and message construction.
-`cmd_search` uses only `_init_embed_store()` for retrieval without LLM generation. With `--enhance`, it additionally calls `_init_enhancer()` to initialize the query enhancer and rewrites the question before retrieval — same enhancement logic as `cmd_ask`, but without LLM answer generation.
+`cmd_search` uses only `_init_retrieval()` for retrieval without LLM generation. With `--enhance`, it additionally calls `_init_enhancer()` to initialize the query enhancer and rewrites the question before retrieval — same enhancement logic as `cmd_ask`, but without LLM answer generation.
 
 `cmd_search` with `--enhance` follows a simplified path compared to `_retrieve_context`:
 
 ```text
 cmd_search(question, use_enhancer=True)
-├─► _init_embed_store(config)          →  store
+├─► _init_retrieval(config)          →  store
 ├─► _init_enhancer(config)             →  enhancer
 ├─► enhancer.enhance(question)         →  rewritten_question
 │   (same logic as _retrieve_context: LLM retrieval-paragraph, or local MarianMT)
@@ -179,20 +182,24 @@ _retrieve_context(..., retrieval_distance_threshold=None, reranker=None) -> Retr
 ├─► print "[step] retrieving..."
 ├─► k_for_search = retrieval_k * 4  (if reranker enabled, else retrieval_k)
 ├─► store.query(rewritten_question, k_for_search, distance_threshold)
-│   ├─ [if bm25_enabled] _hybrid_query():
+│   ├─ [if vector + bm25] _hybrid_query():
 │   │   ├─ vector search: embed query → Chroma cosine similarity → 2k candidates
 │   │   ├─ BM25 search: jieba tokenize query → rank_bm25 → 2k candidates
 │   │   ├─ RRF fusion: score = Σ 1/(60 + rank) per candidate across both lists
 │   │   └─ sort by fused score, return top-k
 │   │
-│   └─ [if bm25_disabled] vector-only:
-│       ├─ embed_engine.get_embedding(rewritten_question)  →  vector
-│       ├─ collection.query(query_embeddings, n_results=k_for_search)
-│       │   Chroma cosine similarity search
-│       │   returns top-k_for_search document chunks
-│       └─ filter by distance_threshold (if set)
-│           discard chunks with distance >= threshold
-│           if none pass, return top-1 as fallback
+│   ├─ [if vector only] _vector_query():
+│   │   ├─ embed_engine.get_embedding(rewritten_question)  →  vector
+│   │   ├─ collection.query(query_embeddings, n_results=k_for_search)
+│   │   │   Chroma cosine similarity search
+│   │   │   returns top-k_for_search document chunks
+│   │   └─ filter by distance_threshold (if set)
+│   │       discard chunks with distance >= threshold
+│   │       if none pass, return top-1 as fallback
+│   │
+│   └─ [if bm25 only] _bm25_query():
+│       ├─ BM25 search: jieba tokenize query → rank_bm25 → top-k
+│       └─ return documents (no embedding model needed)
 │
 ├─► [optional] reranker.rerank(rewritten_question, chunks, top_k=retrieval_k)
 │   ├─ CrossEncoder.predict([(query, chunk) ...])  →  scores
@@ -303,11 +310,10 @@ load_documents(docs_dir, config) -> (list[dict], dict[str, str])
 - `min_chars`: sections shorter than this are dropped as noise.
 - `include_heading`: if `true`, prepends the section heading (`> heading`) to each chunk.
 
-**fixed mode** (`chunking.fixed`):
+**fixed mode** (`chunking.fixed`): controlled by `split_by` (`"char"` or `"line"`):
 
-- Splits at `max_chars` (hard ceiling, never exceeded), then searches backward for the best separator by priority: paragraph break (`\n\n`) > newline (`\n`) > sentence-ending punctuation (`。！？.!？`) > space > hard cut. Minimum boundary = `max_chars // 2`.
-- `max_chars`: hard limit per chunk. Default: `700`.
-- `overlap_chars`: adjacent chunks overlap by this many characters to preserve context.
+- **char sub-mode**: Splits at `max_chars` (hard ceiling, never exceeded), then searches backward for the best separator by priority: paragraph break (`\n\n`) > newline (`\n`) > sentence-ending punctuation (`。！？.!？`) > space > hard cut. Minimum boundary = `max_chars // 2`. `overlap_chars`: adjacent chunks overlap by this many characters.
+- **line sub-mode**: Splits by line count (`max_lines`), preserving complete line boundaries -- no line is ever cut. Within the sliding window, prefers blank lines (paragraph breaks) as split points; falls back to punctuation-only lines, then hard cut at `max_lines`. `overlap_lines`: adjacent chunks overlap by this many lines.
 
 ### lib/embed_engine.py
 
@@ -329,19 +335,21 @@ EmbedEngine(model_name, lang="en")
 ### lib/vector_db.py
 
 ```text
-VectorDb(persist_dir, embed_engine=None, bm25_enabled=False, model_name="")
+VectorDb(persist_dir, embed_engine=None, vector_enabled=True, bm25_enabled=False, model_name="")
   .rebuild(chunks, file_hashes) -> None        # incremental: only re-embed changed files
   .rebuild_full(chunks, file_hashes) -> None    # delete collection, recreate, re-embed all
   .query(question, k, distance_threshold=None) -> list[str]
+  .has_changes(file_hashes) -> bool            # detect file changes (works for both storage modes)
   .get_meta_model() -> str | None              # read stored model name from build_meta.json
 ```
 
-- `chromadb.PersistentClient` with cosine distance (`hnsw:space: "cosine"`).
-- Collection name: `"documents"`. Telemetry disabled.
+- When `vector_enabled=true`: `chromadb.PersistentClient` with cosine distance (`hnsw:space: "cosine"`). Collection name: `"documents"`. Telemetry disabled. `embed_engine` must be provided.
+- When `vector_enabled=false` (BM25-only): `self._client = None`, no ChromaDB loaded. `embed_engine` can be `None`. BM25 data stored in `bm25_store.json` (JSON file with chunks and file hashes).
 - `rebuild()` prints an incremental summary: `[info] incremental: +N new, ~N updated, -N removed, total N chunks`.
 - `rebuild_full()` deletes and recreates the collection (not just clears entries) to handle embedding dimension changes when switching models.
-- `build_meta.json` stores `_model` alongside file hashes for model change detection.
-- When `bm25_enabled`, `query()` delegates to `_hybrid_query()` which runs vector search and BM25 in parallel, then merges results via Reciprocal Rank Fusion (RRF): `score = Σ 1/(60 + rank)` per candidate across both ranked lists. The BM25 index is synced after every `rebuild()` and `rebuild_full()` call.
+- `build_meta.json` stores `_model` alongside file hashes for model change detection (vector mode). `bm25_store.json` stores `file_hashes` for change detection (BM25-only mode).
+- Query routing: `vector + bm25` → `_hybrid_query()` (RRF fusion); `vector only` → `_vector_query()`; `bm25 only` → `_bm25_query()`.
+- When both enabled, `query()` delegates to `_hybrid_query()` which runs vector search and BM25 in parallel, then merges results via Reciprocal Rank Fusion (RRF): `score = Σ 1/(60 + rank)` per candidate across both ranked lists. The BM25 index is synced after every `rebuild()` and `rebuild_full()` call.
 
 ### lib/bm25_retriever.py
 

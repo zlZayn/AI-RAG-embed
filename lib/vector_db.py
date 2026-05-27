@@ -14,26 +14,37 @@ class VectorDb:
         self,
         persist_dir: str,
         embed_engine=None,
+        vector_enabled: bool = True,
         bm25_enabled: bool = False,
         model_name: str = "",
     ):
         self._persist_dir = persist_dir
         self._embed_engine = embed_engine
         self._model_name = model_name
+        self._vector_enabled = vector_enabled
         self._bm25_enabled = bm25_enabled
+        self._bm25_texts: list[str] = []
+        self._bm25_sources: list[str] = []
+
+        if vector_enabled:
+            self._client = chromadb.PersistentClient(
+                path=persist_dir,
+                settings=Settings(anonymized_telemetry=False),
+            )
+            self._collection = self._client.get_or_create_collection(
+                name="documents",
+                metadata={"hnsw:space": "cosine"},
+            )
+        else:
+            self._client = None
+            self._collection = None
+
         self._bm25 = BM25Retriever() if bm25_enabled else None
-        self._bm25_texts = []
-        self._bm25_sources = []
-        self._client = chromadb.PersistentClient(
-            path=persist_dir,
-            settings=Settings(anonymized_telemetry=False),
-        )
-        self._collection = self._client.get_or_create_collection(
-            name="documents",
-            metadata={"hnsw:space": "cosine"},
-        )
         if bm25_enabled:
-            self._rebuild_bm25_from_store()
+            if vector_enabled:
+                self._rebuild_bm25_from_store()
+            else:
+                self._load_bm25_from_file()
 
     def _meta_path(self) -> str:
         return os.path.join(self._persist_dir, _META_FILE)
@@ -54,6 +65,35 @@ class VectorDb:
         old = self._load_meta()
         return old.get("_model")
 
+    # ------------------------------------------------------------------
+    # BM25 file storage (BM25-only mode)
+    # ------------------------------------------------------------------
+
+    def _bm25_store_path(self) -> str:
+        return os.path.join(self._persist_dir, "bm25_store.json")
+
+    def _load_bm25_from_file(self) -> None:
+        path = self._bm25_store_path()
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self._bm25_texts = [c["text"] for c in data["chunks"]]
+        self._bm25_sources = [c["source"] for c in data["chunks"]]
+        self._bm25.build(self._bm25_texts)
+        print(f"[info] BM25 index loaded from file: {len(self._bm25_texts)} chunks")
+
+    def _save_bm25_to_file(
+        self, chunks: list[dict], file_hashes: dict[str, str]
+    ) -> None:
+        data = {"chunks": chunks, "file_hashes": file_hashes}
+        with open(self._bm25_store_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # ------------------------------------------------------------------
+    # BM25 from ChromaDB (hybrid mode)
+    # ------------------------------------------------------------------
+
     def _rebuild_bm25_from_store(self) -> None:
         """Load all documents from Chroma into BM25 index."""
         all_data = self._collection.get(include=["documents", "metadatas"])
@@ -63,33 +103,94 @@ class VectorDb:
             self._bm25.build(self._bm25_texts)
             print(f"[info] BM25 index loaded: {len(self._bm25_texts)} chunks")
 
+    # ------------------------------------------------------------------
+    # Change detection
+    # ------------------------------------------------------------------
+
     def has_changes(self, file_hashes: dict[str, str]) -> bool:
-        old_meta = self._load_meta()
-        if set(old_meta.keys()) != set(file_hashes.keys()):
-            return True
-        return any(old_meta[f] != file_hashes[f] for f in file_hashes)
+        if self._vector_enabled:
+            old_meta = self._load_meta()
+            if set(old_meta.keys()) != set(file_hashes.keys()):
+                return True
+            return any(old_meta[f] != file_hashes[f] for f in file_hashes)
+        elif self._bm25_enabled:
+            path = self._bm25_store_path()
+            if not os.path.exists(path):
+                return True
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            old_hashes = data.get("file_hashes", {})
+            return old_hashes != file_hashes
+        return False
+
+    # ------------------------------------------------------------------
+    # Build / rebuild
+    # ------------------------------------------------------------------
 
     def rebuild(self, chunks: list[dict], file_hashes: dict[str, str]) -> None:
-        old_meta = self._load_meta()
+        if self._vector_enabled:
+            old_meta = self._load_meta()
 
-        removed = [f for f in old_meta if f not in file_hashes]
-        added = [f for f in file_hashes if f not in old_meta]
-        changed = [
-            f for f in file_hashes if f in old_meta and file_hashes[f] != old_meta[f]
-        ]
+            removed = [f for f in old_meta if f not in file_hashes]
+            added = [f for f in file_hashes if f not in old_meta]
+            changed = [
+                f
+                for f in file_hashes
+                if f in old_meta and file_hashes[f] != old_meta[f]
+            ]
 
-        for source in removed + changed:
-            self._collection.delete(where={"source": source})
+            for source in removed + changed:
+                self._collection.delete(where={"source": source})
 
-        to_add = added + changed
-        if to_add:
-            new_chunks = [c for c in chunks if c["source"] in to_add]
-            texts = [c["text"] for c in new_chunks]
-            sources = [c["source"] for c in new_chunks]
-            base = len(self._collection.get()["ids"])
-            ids = [f"{sources[i]}_{base + i}" for i in range(len(new_chunks))]
+            to_add = added + changed
+            if to_add:
+                new_chunks = [c for c in chunks if c["source"] in to_add]
+                texts = [c["text"] for c in new_chunks]
+                sources = [c["source"] for c in new_chunks]
+                base = len(self._collection.get()["ids"])
+                ids = [f"{sources[i]}_{base + i}" for i in range(len(new_chunks))]
+
+                embeddings = self._embed_engine.embed_batch(texts)
+                self._collection.add(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=texts,
+                    metadatas=[{"source": s} for s in sources],
+                )
+
+            self._save_meta(file_hashes)
+
+            total = self._collection.count()
+            print(
+                f"[info] incremental: +{len(added)} new, ~{len(changed)} updated, "
+                f"-{len(removed)} removed, total {total} chunks"
+            )
+
+        if self._bm25_enabled:
+            if self._vector_enabled:
+                self._rebuild_bm25_from_store()
+            else:
+                self._save_bm25_to_file(chunks, file_hashes)
+                self._bm25_texts = [c["text"] for c in chunks]
+                self._bm25_sources = [c["source"] for c in chunks]
+                self._bm25.build(self._bm25_texts)
+                print(f"[info] BM25 index built: {len(self._bm25_texts)} chunks")
+
+    def rebuild_full(self, chunks: list[dict], file_hashes: dict[str, str]) -> None:
+        if self._vector_enabled:
+            texts = [c["text"] for c in chunks]
+            sources = [c["source"] for c in chunks]
+            ids = [str(i) for i in range(len(chunks))]
 
             embeddings = self._embed_engine.embed_batch(texts)
+
+            # Delete and recreate collection to handle dimension changes
+            self._client.delete_collection("documents")
+            self._collection = self._client.get_or_create_collection(
+                name="documents",
+                metadata={"hnsw:space": "cosine"},
+            )
+
             self._collection.add(
                 ids=ids,
                 embeddings=embeddings,
@@ -97,44 +198,93 @@ class VectorDb:
                 metadatas=[{"source": s} for s in sources],
             )
 
-        self._save_meta(file_hashes)
+            self._save_meta(file_hashes)
 
         if self._bm25_enabled:
-            self._rebuild_bm25_from_store()
+            self._bm25_texts = [c["text"] for c in chunks]
+            self._bm25_sources = [c["source"] for c in chunks]
+            self._bm25.build(self._bm25_texts)
+            if not self._vector_enabled:
+                self._save_bm25_to_file(chunks, file_hashes)
+            print(f"[info] BM25 index rebuilt: {len(self._bm25_texts)} chunks")
 
-        total = self._collection.count()
-        print(
-            f"[info] incremental: +{len(added)} new, ~{len(changed)} updated, "
-            f"-{len(removed)} removed, total {total} chunks"
+    # ------------------------------------------------------------------
+    # Query
+    # ------------------------------------------------------------------
+
+    def query(
+        self, question: str, k: int = 3, distance_threshold: float = None
+    ) -> list[str]:
+        """Retrieve top-k document chunks."""
+        if self._vector_enabled and self._bm25_enabled and self._bm25.ready:
+            return self._hybrid_query(
+                question, k=k, distance_threshold=distance_threshold
+            )
+        elif self._vector_enabled:
+            return self._vector_query(
+                question, k=k, distance_threshold=distance_threshold
+            )
+        elif self._bm25_enabled and self._bm25.ready:
+            return self._bm25_query(question, k=k)
+        else:
+            return []
+
+    def _vector_query(
+        self, question: str, k: int = 3, distance_threshold: float = None
+    ) -> list[str]:
+        """Vector-only retrieval."""
+        question_embedding = self._embed_engine.get_embedding(question)
+
+        results = self._collection.query(
+            query_embeddings=[question_embedding],
+            n_results=k,
+            include=["documents", "distances"],
         )
 
-    def rebuild_full(self, chunks: list[dict], file_hashes: dict[str, str]) -> None:
-        texts = [c["text"] for c in chunks]
-        sources = [c["source"] for c in chunks]
-        ids = [str(i) for i in range(len(chunks))]
+        documents = results["documents"][0] if results["documents"] else []
+        distances = results["distances"][0] if results["distances"] else []
 
-        embeddings = self._embed_engine.embed_batch(texts)
+        if not documents:
+            return []
 
-        # Delete and recreate collection to handle dimension changes
-        self._client.delete_collection("documents")
-        self._collection = self._client.get_or_create_collection(
-            name="documents",
-            metadata={"hnsw:space": "cosine"},
-        )
+        print("\n[debug] retrieval details")
+        for i, (doc, dist) in enumerate(zip(documents, distances)):
+            similarity = 1 - dist
+            print(
+                f"[debug]   chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}"
+            )
 
-        self._collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=texts,
-            metadatas=[{"source": s} for s in sources],
-        )
+        if distance_threshold is not None:
+            filtered = [
+                (doc, dist)
+                for doc, dist in zip(documents, distances)
+                if dist < distance_threshold
+            ]
+            if filtered:
+                documents = [item[0] for item in filtered]
+                print(
+                    f"[debug] filtered to {len(documents)} chunks (threshold={distance_threshold})"
+                )
+            else:
+                print(
+                    f"[warn] no chunks passed threshold={distance_threshold}, returning closest"
+                )
+                documents = [documents[0]]
 
-        self._save_meta(file_hashes)
+        return documents
 
-        if self._bm25_enabled:
-            self._bm25_texts = texts
-            self._bm25_sources = sources
-            self._bm25.build(texts)
+    def _bm25_query(self, question: str, k: int = 3) -> list[str]:
+        """BM25-only retrieval."""
+        hits = self._bm25.query(question, k=k)
+        documents = [self._bm25_texts[i] for i, _ in hits]
+
+        print("\n[debug] BM25 retrieval details")
+        for i, (idx, score) in enumerate(hits):
+            src = self._bm25_sources[idx] if idx < len(self._bm25_sources) else ""
+            print(f"[debug]   chunk {i + 1}: bm25_score={score:.4f} [source: {src}]")
+            print(f"[debug]     preview: {self._bm25_texts[idx][:80]}...")
+
+        return documents
 
     def _hybrid_query(
         self, question: str, k: int = 3, distance_threshold: float = None
@@ -184,54 +334,5 @@ class VectorDb:
                 src = f" [source: {self._bm25_sources[idx]}]"
             print(f"[debug]   chunk {i + 1}: rrf_score={score:.6f}{src}")
             print(f"[debug]     preview: {doc[:80]}...")
-
-        return documents
-
-    def query(
-        self, question: str, k: int = 3, distance_threshold: float = None
-    ) -> list[str]:
-        """检索最相似的文档块，可选按余弦距离阈值过滤。"""
-        if self._bm25_enabled and self._bm25.ready:
-            return self._hybrid_query(
-                question, k=k, distance_threshold=distance_threshold
-            )
-
-        question_embedding = self._embed_engine.get_embedding(question)
-
-        results = self._collection.query(
-            query_embeddings=[question_embedding],
-            n_results=k,
-            include=["documents", "distances"],
-        )
-
-        documents = results["documents"][0] if results["documents"] else []
-        distances = results["distances"][0] if results["distances"] else []
-
-        if not documents:
-            return []
-
-        print("\n[debug] retrieval details")
-        for i, (doc, dist) in enumerate(zip(documents, distances)):
-            similarity = 1 - dist
-            print(
-                f"[debug]   chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}"
-            )
-
-        if distance_threshold is not None:
-            filtered = [
-                (doc, dist)
-                for doc, dist in zip(documents, distances)
-                if dist < distance_threshold
-            ]
-            if filtered:
-                documents = [item[0] for item in filtered]
-                print(
-                    f"[debug] filtered to {len(documents)} chunks (threshold={distance_threshold})"
-                )
-            else:
-                print(
-                    f"[warn] no chunks passed threshold={distance_threshold}, returning closest"
-                )
-                documents = [documents[0]]
 
         return documents

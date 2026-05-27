@@ -37,18 +37,29 @@ def _resolve_model_name(config: dict) -> str:
     return model
 
 
-def _init_embed_store(config: dict):
+def _init_retrieval(config: dict):
     with _timed("Importing modules"):
         EmbedEngine, LlmApi, VectorDb = _import_lib()
-    model_name = _resolve_model_name(config)
-    lang = config.get("docs_lang", "en")
-    with _timed("Loading embedding model"):
-        embed_engine = EmbedEngine(model_name=model_name, lang=lang)
-    with _timed("Loading vector index"):
+    vector_enabled = config.get("vector_enabled", True)
+    bm25_enabled = config.get("bm25_enabled", False)
+
+    if not vector_enabled and not bm25_enabled:
+        print("[error] At least one of vector_enabled or bm25_enabled must be true.")
+        raise SystemExit(1)
+
+    model_name = _resolve_model_name(config) if vector_enabled else ""
+    embed_engine = None
+    if vector_enabled:
+        lang = config.get("docs_lang", "en")
+        with _timed("Loading embedding model"):
+            embed_engine = EmbedEngine(model_name=model_name, lang=lang)
+
+    with _timed("Loading retrieval store"):
         store = VectorDb(
             persist_dir=_resolve_path(config, "chroma_persist_dir"),
             embed_engine=embed_engine,
-            bm25_enabled=config.get("bm25_enabled", False),
+            vector_enabled=vector_enabled,
+            bm25_enabled=bm25_enabled,
             model_name=model_name,
         )
     return store, LlmApi
@@ -212,7 +223,7 @@ def _retrieve_context(
 
 
 def _init_ask_chat(config: dict):
-    store, LlmApi = _init_embed_store(config)
+    store, LlmApi = _init_retrieval(config)
 
     with _timed("Initializing LLM"):
         llm = LlmApi(
@@ -289,7 +300,7 @@ def _init_reranker(config: dict):
 
 def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
     """Search only: retrieve document chunks without LLM generation."""
-    store, _ = _init_embed_store(config)
+    store, _ = _init_retrieval(config)
 
     distance_threshold = config.get("retrieval_distance_threshold")
     enhancer_threshold = None
@@ -385,7 +396,6 @@ def cmd_build(config: dict, force: bool = False) -> None:
     t0 = time.perf_counter()
 
     docs_dir = _resolve_path(config, "docs_dir")
-    persist_dir = _resolve_path(config, "chroma_persist_dir")
 
     if not os.path.isdir(docs_dir):
         print(f"[error] docs directory not found: {docs_dir}")
@@ -401,16 +411,20 @@ def cmd_build(config: dict, force: bool = False) -> None:
         f"[info] {len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
     )
 
-    store, _ = _init_embed_store(config)
+    store, _ = _init_retrieval(config)
 
     # Auto full-rebuild when embedding model changed
-    old_model = store.get_meta_model()
-    new_model = _resolve_model_name(config)
-    if old_model and old_model != new_model:
-        print(f"[info] model changed: {old_model} -> {new_model}, forcing full rebuild")
-        force = True
+    vector_enabled = config.get("vector_enabled", True)
+    if vector_enabled:
+        old_model = store.get_meta_model()
+        new_model = _resolve_model_name(config)
+        if old_model and old_model != new_model:
+            print(
+                f"[info] model changed: {old_model} -> {new_model}, forcing full rebuild"
+            )
+            force = True
 
-    if not force and not _has_file_changes(persist_dir, file_hashes):
+    if not force and not store.has_changes(file_hashes):
         print("[info] no changes detected, skipping")
         print(f"[step] build complete [{time.perf_counter() - t0:.1f}s total]")
         return

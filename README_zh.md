@@ -147,12 +147,18 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | `min_chars` | 最小字符数，低于此值的片段会被丢弃。默认值：`100`。 |
 | `include_heading` | 在每个片段开头附加所属标题（`> 标题`）。默认值：`false`。 |
 
-**fixed 模式**（`chunking.fixed`）：在 `max_chars` 处切分（硬上限，绝不超出），按优先级回退到最近的分隔符（`\n\n` > `\n` > 标点 > 空格）。
+**fixed 模式**（`chunking.fixed`）：由 `split_by` 控制两种子模式：
+
+- `"char"`（默认）：在 `max_chars` 处切分（硬上限，绝不超出），按优先级回退到最近的分隔符（`\n\n` > `\n` > 标点 > 空格）。`overlap_chars` 控制相邻片段重叠字符数。
+- `"line"`：按行数切分（`max_lines`），保留完整行边界不截断。优先在空行（段落边界）处切分。`overlap_lines` 控制相邻片段重叠行数。
 
 | 配置项 | 说明 |
 | --- | --- |
-| `max_chars` | 单个片段硬上限字符数。绝不超出。默认值：`700`。 |
-| `overlap_chars` | 相邻片段的重叠字符数。默认值：`70`。 |
+| `split_by` | `"char"`（默认）= 按字符数切分。`"line"` = 按行数切分。 |
+| `char.max_chars` | 单个片段硬上限字符数（char 模式）。默认值：`700`。 |
+| `char.overlap_chars` | 相邻片段重叠字符数（char 模式）。默认值：`70`。 |
+| `line.max_lines` | 单个片段最大行数（line 模式）。默认值：`20`。 |
+| `line.overlap_lines` | 相邻片段重叠行数（line 模式）。默认值：`3`。 |
 
 ### 查询增强（`enhancer`）
 
@@ -184,9 +190,19 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 
 | 配置项 | 说明 |
 | --- | --- |
-| `bm25_enabled` | 启用 BM25 关键词检索，与向量搜索并行召回，结果通过 RRF（Reciprocal Rank Fusion）融合排序。提升精确术语匹配（如专有名词、缩写）。默认值：`false`。 |
+| `vector_enabled` | 启用向量（embedding）检索。设为 `false` 时不加载 embedding 模型，启动更快、内存更省。默认值：`true`。 |
+| `bm25_enabled` | 启用 BM25 关键词检索。可单独使用，也可与向量检索组合；组合时结果通过 RRF（Reciprocal Rank Fusion）融合排序。默认值：`false`。 |
 | `retrieval_k` | 每次查询检索的片段数。默认值：`3`。 |
-| `retrieval_distance_threshold` | 全局余弦距离阈值回退值。启用增强时，会被增强器配置中各模式的 `distance_threshold` 覆盖。设为 `null` 禁用过滤。默认值：`0.3`。 |
+| `retrieval_distance_threshold` | 向量检索的余弦距离阈值，超过此值的 chunk 被过滤。仅 `vector_enabled=true` 时生效。启用增强时，会被增强器配置中各模式的 `distance_threshold` 覆盖。设为 `null` 禁用过滤。默认值：`0.3`。 |
+
+`vector_enabled` 和 `bm25_enabled` 至少启用一种。四种组合：
+
+| `vector_enabled` | `bm25_enabled` | 行为 |
+| --- | --- | --- |
+| `true` | `true` | 混合检索：向量 + BM25，RRF 融合排序 |
+| `true` | `false` | 纯向量检索 |
+| `false` | `true` | 纯 BM25 检索（不加载 embedding 模型） |
+| `false` | `false` | 报错：至少启用一种 |
 
 **精排重排序**（可选）：两阶段检索——向量搜索先召回 `retrieval_k * 4` 个候选，再用 cross-encoder 按相关性精排后截取最终的 `retrieval_k` 个。对 bi-encoder 余弦相似度不足以区分的场景，能显著提升精度。
 

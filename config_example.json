@@ -10,8 +10,15 @@
             "include_heading": false
         },
         "fixed": {
-            "max_chars": 700,
-            "overlap_chars": 70
+            "split_by": "char",
+            "char": {
+                "max_chars": 700,
+                "overlap_chars": 70
+            },
+            "line": {
+                "max_lines": 20,
+                "overlap_lines": 3
+            }
         }
     },
     "embedding_model_name": {
@@ -36,6 +43,7 @@
             "distance_threshold": 0.2
         }
     },
+    "vector_enabled": true,
     "bm25_enabled": true,
     "retrieval_k": 3,
     "retrieval_distance_threshold": 0.3,
