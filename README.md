@@ -158,7 +158,7 @@ Controls how documents are split into chunks for embedding.
 | `char.max_chars` | Hard limit per chunk (char mode). Default: `700`. |
 | `char.overlap_chars` | Overlap between adjacent chunks (char mode). Default: `70`. |
 | `line.max_lines` | Max lines per chunk (line mode). Default: `20`. |
-| `line.overlap_lines` | Overlap in lines between adjacent chunks (line mode). Default: `3`. |
+| `line.overlap_lines` | Overlap in lines between adjacent chunks (line mode). Keep below `max_lines // 2` for best break-point quality. Default: `3`. |
 
 ### Query Enhancement (`enhancer`)
 

@@ -313,7 +313,7 @@ load_documents(docs_dir, config) -> (list[dict], dict[str, str])
 **fixed mode** (`chunking.fixed`): controlled by `split_by` (`"char"` or `"line"`):
 
 - **char sub-mode**: Splits at `max_chars` (hard ceiling, never exceeded), then searches backward for the best separator by priority: paragraph break (`\n\n`) > newline (`\n`) > sentence-ending punctuation (`。！？.!？`) > space > hard cut. Minimum boundary = `max_chars // 2`. `overlap_chars`: adjacent chunks overlap by this many characters.
-- **line sub-mode**: Splits by line count (`max_lines`), preserving complete line boundaries -- no line is ever cut. Within the sliding window, prefers blank lines (paragraph breaks) as split points; falls back to punctuation-only lines, then hard cut at `max_lines`. `overlap_lines`: adjacent chunks overlap by this many lines.
+- **line sub-mode**: Splits by line count (`max_lines`), preserving complete line boundaries -- no line is ever cut. Within the sliding window, prefers blank lines (paragraph breaks) as split points; falls back to punctuation-only lines, then hard cut at `max_lines`. `overlap_lines`: adjacent chunks overlap by this many lines. Break-point search scans the second half of the window (`[start + max_lines//2, start + max_lines)`). When `overlap_lines >= max_lines // 2`, the overlap can pull the next window's start back before the search range, causing break points to land outside natural paragraph boundaries. The code warns at parse time and forces forward progress to prevent infinite loops, but for best results keep `overlap_lines < max_lines // 2`.
 
 ### lib/embed_engine.py
 

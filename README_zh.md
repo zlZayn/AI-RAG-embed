@@ -158,7 +158,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | `char.max_chars` | 单个片段硬上限字符数（char 模式）。默认值：`700`。 |
 | `char.overlap_chars` | 相邻片段重叠字符数（char 模式）。默认值：`70`。 |
 | `line.max_lines` | 单个片段最大行数（line 模式）。默认值：`20`。 |
-| `line.overlap_lines` | 相邻片段重叠行数（line 模式）。默认值：`3`。 |
+| `line.overlap_lines` | 相邻片段重叠行数（line 模式）。建议小于 `max_lines // 2` 以保证断点质量。默认值：`3`。 |
 
 ### 查询增强（`enhancer`）
 

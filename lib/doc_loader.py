@@ -110,6 +110,11 @@ def _parse_chunking_config(config: dict) -> dict:
         raise ValueError(
             f"overlap_lines ({line_overlap}) must be < max_lines ({line_max})"
         )
+    if line_overlap >= line_max // 2:
+        print(
+            f"[warn] overlap_lines ({line_overlap}) >= max_lines // 2 ({line_max // 2}); "
+            f"break-point search may not land on natural boundaries"
+        )
 
     if mode == "auto":
         max_chars = auto_target
@@ -231,9 +236,12 @@ def _load_fixed_by_lines(
 
         if break_idx >= len(lines):
             break
-        start = break_idx - overlap_lines
-        if start < 0:
-            start = 0
+        next_start = break_idx - overlap_lines
+        if next_start < 0:
+            next_start = 0
+        if next_start <= start:
+            next_start = start + 1
+        start = next_start
 
     return chunks
 
