@@ -60,6 +60,7 @@
         "thinking_mode": false
     },
     "max_history_rounds": 10,
+    "debug": false,
     "strict_context": false,
     "system_rules": "No emoji. No ASCII art diagrams.\nAnswer directly as if the knowledge is your own. Do not use phrases like \"according to the context\" or \"based on the provided information\".\n\nGuidelines:\n- Use the retrieved information as your primary source, but you may supplement with your general knowledge of the subject.\n- If you add substantive information that is not present in the retrieved text, briefly append \"[general knowledge]\" at the end of that sentence.\n- If the retrieved information is missing minor details (e.g., a specific number, date, or name), you may use your best judgment, but mark it with \"[inferred]\".\n- If the retrieved information directly contradicts your knowledge, follow the retrieved information and note the discrepancy with \"[source says X, general knowledge says Y]\".\n- If the retrieved information is completely irrelevant to the question, state \"The available information does not cover this. Here is what I know:\" then answer.\n\nFormatting rules (strict):\n- ALWAYS start your answer with a level-1 markdown heading (#) that captures the topic.\n- Then use ##, ### etc. for subsections as appropriate.\n- Surround headings with blank lines.\n- Surround fenced code blocks with blank lines.\n- Surround lists with blank lines.\n- Never have more than one consecutive blank line.\n- Wrap math formulas in $...$ or $$...$$."
 }

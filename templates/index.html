@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG QA</title>
+  <style>
+    :root {
+      --bg: #f6f4f1;
+      --surface: #ffffff;
+      --border: #e0dbd5;
+      --text: #3e3b38;
+      --text-secondary: #8a857e;
+      --text-muted: #bfb9b0;
+      --accent: #9aab98;
+      --accent-hover: #879b84;
+      --toggle-bg: #eeebe6;
+      --pad: 24px;
+      --radius: 8px;
+      --border-decl: 1px solid var(--border);
+      --font-sans: -apple-system, "Segoe UI", sans-serif;
+      --font-mono: "SF Mono", "Cascadia Code", "Consolas", monospace;
+      --cw: 580px;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+      position: relative;
+      min-height: 100vh;
+    }
+
+    .container {
+      position: absolute;
+      width: var(--cw);
+      max-width: calc(100vw - var(--pad) * 2);
+      left: 0;
+      right: 0;
+      margin: 0 auto;
+      top: 12vh;
+      transition: top .4s ease;
+    }
+
+    body.shut .container {
+      top: var(--pad);
+    }
+
+    /* Output — 默认绝对定位，跟随 container */
+    .output-wrap {
+      position: absolute;
+      width: var(--cw);
+      max-width: calc(100vw - var(--pad) * 2);
+      left: 0;
+      right: 0;
+      margin: 0 auto;
+      top: calc(12vh + 122px);
+      transition: all .4s ease;
+    }
+
+    /* Output — 发送后固定定位，左右对称 */
+    body.shut .output-wrap {
+      position: fixed;
+      left: var(--pad);
+      right: var(--pad);
+      top: 120px;
+      bottom: var(--pad);
+      width: auto;
+      margin: 0;
+      max-width: none;
+    }
+
+    /* Toggle */
+    .toggle {
+      display: flex;
+      margin-bottom: 10px;
+      background: var(--toggle-bg);
+      border-radius: var(--radius);
+      padding: 3px;
+    }
+
+    .toggle button {
+      flex: 1;
+      padding: 7px 0;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      border-radius: calc(var(--radius) - 2px);
+      transition: .2s;
+    }
+
+    .toggle button.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 1px 3px rgba(74, 69, 64, .1);
+    }
+
+    /* Input */
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    input {
+      flex: 1;
+      padding: 10px 14px;
+      border: var(--border-decl);
+      border-radius: var(--radius);
+      font-size: 14px;
+      outline: none;
+      background: var(--surface);
+      transition: border-color .2s;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+    }
+
+    /* Button */
+    button.send {
+      padding: 10px 22px;
+      background: var(--accent);
+      color: var(--surface);
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: .2s;
+    }
+
+    button.send:hover {
+      background: var(--accent-hover);
+    }
+
+    button.send:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .output-label,
+    .output-clear {
+      position: absolute;
+      top: -9px;
+      background: var(--surface);
+      padding: 0 6px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      z-index: 1;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border: var(--border-decl);
+      border-radius: var(--radius);
+    }
+
+    .output-label {
+      left: 12px;
+    }
+
+    .output-clear {
+      right: 12px;
+      cursor: pointer;
+      line-height: 18px;
+      transition: .2s;
+    }
+
+    .output-clear:hover {
+      background: var(--accent);
+      color: var(--surface);
+    }
+
+    pre {
+      background: var(--surface);
+      border: var(--border-decl);
+      border-radius: var(--radius);
+      padding: 18px;
+      min-height: 320px;
+      font-size: 13px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: var(--font-mono);
+    }
+
+    body.shut pre {
+      max-height: 100%;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--accent) transparent;
+    }
+
+    body.shut pre::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    body.shut pre::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    body.shut pre::-webkit-scrollbar-thumb {
+      background: var(--accent);
+      border-radius: 3px;
+    }
+
+    body.shut pre::-webkit-scrollbar-thumb:hover {
+      background: var(--accent-hover);
+    }
+
+    .hint {
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="toggle">
+      <button class="active" onclick="setMode('question', this)">Question</button>
+      <button onclick="setMode('search', this)">Search</button>
+    </div>
+    <div class="input-row">
+      <input id="query" placeholder="输入问题，按 Enter 或点击发送" onkeydown="if(event.key==='Enter') send()">
+      <button class="send" id="btn" onclick="send()">Send</button>
+    </div>
+  </div>
+  <div class="output-wrap">
+    <span class="output-label" id="label">QUESTION</span>
+    <span class="output-clear" id="clearBtn" onclick="clearOutput()">CLEAR</span>
+    <pre id="output"><span class="hint">等待输入...</span></pre>
+  </div>
+  <script>
+    const $ = id => document.getElementById(id);
+    let mode = 'question';
+
+    function setMode(m, el) {
+      mode = m;
+      document.querySelectorAll('.toggle button').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+      $('label').textContent = m.toUpperCase();
+      $('query').placeholder = m === 'search'
+        ? '输入关键词，按 Enter 或点击检索'
+        : '输入问题，按 Enter 或点击发送';
+    }
+
+    function clearOutput() {
+      $('output').innerHTML = '<span class="hint">等待输入...</span>';
+      document.body.classList.remove('shut');
+    }
+
+    async function send() {
+      const q = $('query').value.trim();
+      if (!q) return;
+      const btn = $('btn');
+      const out = $('output');
+      btn.disabled = true;
+      $('query').value = '';
+      out.innerHTML = '<span class="hint">正在处理...</span>';
+      document.body.classList.add('shut');
+      try {
+        const res = await fetch('/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `mode=${mode}&query=${encodeURIComponent(q)}`
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let started = false;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!started) { out.textContent = ''; started = true; }
+          out.textContent += decoder.decode(value);
+          out.scrollTop = out.scrollHeight;
+        }
+      } catch (e) {
+        out.textContent = 'Error: ' + e.message;
+      }
+      btn.disabled = false;
+      $('query').focus();
+    }
+  </script>
+</body>
+
+</html>

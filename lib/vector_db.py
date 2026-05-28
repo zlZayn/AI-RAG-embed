@@ -17,12 +17,14 @@ class VectorDb:
         vector_enabled: bool = True,
         bm25_enabled: bool = False,
         model_name: str = "",
+        debug: bool = False,
     ):
         self._persist_dir = persist_dir
         self._embed_engine = embed_engine
         self._model_name = model_name
         self._vector_enabled = vector_enabled
         self._bm25_enabled = bm25_enabled
+        self._debug = debug
         self._bm25_texts: list[str] = []
         self._bm25_sources: list[str] = []
 
@@ -247,12 +249,13 @@ class VectorDb:
         if not documents:
             return []
 
-        print("\n[debug] retrieval details")
-        for i, (doc, dist) in enumerate(zip(documents, distances)):
-            similarity = 1 - dist
-            print(
-                f"[debug]   chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}"
-            )
+        if self._debug:
+            print("\n[debug] retrieval details")
+            for i, (doc, dist) in enumerate(zip(documents, distances)):
+                similarity = 1 - dist
+                print(
+                    f"[debug]   chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}"
+                )
 
         if distance_threshold is not None:
             filtered = [
@@ -262,9 +265,10 @@ class VectorDb:
             ]
             if filtered:
                 documents = [item[0] for item in filtered]
-                print(
-                    f"[debug] filtered to {len(documents)} chunks (threshold={distance_threshold})"
-                )
+                if self._debug:
+                    print(
+                        f"[debug] filtered to {len(documents)} chunks (threshold={distance_threshold})"
+                    )
             else:
                 print(
                     f"[warn] no chunks passed threshold={distance_threshold}, returning closest"
@@ -278,11 +282,14 @@ class VectorDb:
         hits = self._bm25.query(question, k=k)
         documents = [self._bm25_texts[i] for i, _ in hits]
 
-        print("\n[debug] BM25 retrieval details")
-        for i, (idx, score) in enumerate(hits):
-            src = self._bm25_sources[idx] if idx < len(self._bm25_sources) else ""
-            print(f"[debug]   chunk {i + 1}: bm25_score={score:.4f} [source: {src}]")
-            print(f"[debug]     preview: {self._bm25_texts[idx][:80]}...")
+        if self._debug:
+            print("\n[debug] BM25 retrieval details")
+            for i, (idx, score) in enumerate(hits):
+                src = self._bm25_sources[idx] if idx < len(self._bm25_sources) else ""
+                print(
+                    f"[debug]   chunk {i + 1}: bm25_score={score:.4f} [source: {src}]"
+                )
+                print(f"[debug]     preview: {self._bm25_texts[idx][:80]}...")
 
         return documents
 
@@ -326,13 +333,14 @@ class VectorDb:
         ranked = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
         documents = [doc for doc, _ in ranked[:k]]
 
-        print("\n[debug] hybrid retrieval details")
-        for i, (doc, score) in enumerate(ranked[:k]):
-            src = ""
-            if doc in self._bm25_texts:
-                idx = self._bm25_texts.index(doc)
-                src = f" [source: {self._bm25_sources[idx]}]"
-            print(f"[debug]   chunk {i + 1}: rrf_score={score:.6f}{src}")
-            print(f"[debug]     preview: {doc[:80]}...")
+        if self._debug:
+            print("\n[debug] hybrid retrieval details")
+            for i, (doc, score) in enumerate(ranked[:k]):
+                src = ""
+                if doc in self._bm25_texts:
+                    idx = self._bm25_texts.index(doc)
+                    src = f" [source: {self._bm25_sources[idx]}]"
+                print(f"[debug]   chunk {i + 1}: rrf_score={score:.6f}{src}")
+                print(f"[debug]     preview: {doc[:80]}...")
 
         return documents

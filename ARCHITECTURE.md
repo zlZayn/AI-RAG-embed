@@ -76,6 +76,7 @@ lib/
 | `reranker` | Retrieval | Reranker config: `model_name` (Default: `"BAAI/bge-reranker-v2-m3"`), `top_k` (Default: `null`, uses `retrieval_k`) |
 | `llm` | Generation | LLM model config (api_base_url, api_key, model, temperature (Default: `0.3`), thinking_mode) |
 | `max_history_rounds` | Behavior | Recent conversation rounds to keep (Default: `10`) |
+| `debug` | Behavior | Enable debug output for retrieval (chunk scores, sources, previews). Can be overridden by `--debug` CLI flag. (Default: `false`) |
 | `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (Default: `false`) |
 | `system_rules` | Behavior | Additional system prompt rules (Default: `""`) |
 
@@ -95,7 +96,7 @@ python rag_qa.py --build               →  cmd_build()            (incremental 
 python rag_qa.py --rebuild             →  cmd_build(force=True)  (full rebuild)
 ```
 
-Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`, `--enhance`. These override the corresponding `config.json` fields; if omitted, config values (or code defaults) are used. CLI override takes highest priority, even over per-mode enhancer thresholds.
+Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`, `--enhance`, `--debug`. These override the corresponding `config.json` fields; if omitted, config values (or code defaults) are used. CLI override takes highest priority, even over per-mode enhancer thresholds.
 
 Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing `chunking` requires a full `--rebuild`; changing `embedding_model_name` is auto-detected by `--build` and triggers a full rebuild automatically.
 
@@ -341,7 +342,7 @@ EmbedEngine(model_name, lang="en")
 ### lib/vector_db.py
 
 ```text
-VectorDb(persist_dir, embed_engine=None, vector_enabled=True, bm25_enabled=False, model_name="")
+VectorDb(persist_dir, embed_engine=None, vector_enabled=True, bm25_enabled=False, model_name="", debug=False)
   .rebuild(chunks, file_hashes) -> None        # incremental: only re-embed changed files
   .rebuild_full(chunks, file_hashes) -> None    # delete collection, recreate, re-embed all
   .query(question, k, distance_threshold=None) -> list[str]

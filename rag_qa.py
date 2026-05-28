@@ -37,7 +37,7 @@ def _resolve_model_name(config: dict) -> str:
     return model
 
 
-def _init_retrieval(config: dict):
+def _init_retrieval(config: dict, debug: bool = False):
     from lib.llm_api import LlmApi
     from lib.vector_db import VectorDb
 
@@ -67,6 +67,7 @@ def _init_retrieval(config: dict):
             vector_enabled=vector_enabled,
             bm25_enabled=bm25_enabled,
             model_name=model_name,
+            debug=debug,
         )
     return store, LlmApi
 
@@ -253,8 +254,8 @@ def _retrieve_context(
     return RetrieveResult(chunks, messages, rewritten_question, enhance_label)
 
 
-def _init_ask_chat(config: dict):
-    store, LlmApi = _init_retrieval(config)
+def _init_ask_chat(config: dict, debug: bool = False):
+    store, LlmApi = _init_retrieval(config, debug=debug)
 
     with _timed("Initializing LLM"):
         llm = LlmApi(
@@ -329,9 +330,11 @@ def _init_reranker(config: dict):
         return Reranker(model_name=cfg.get("model_name", "BAAI/bge-reranker-v2-m3"))
 
 
-def cmd_search(config: dict, question: str, use_enhancer: bool = False) -> None:
+def cmd_search(
+    config: dict, question: str, use_enhancer: bool = False, debug: bool = False
+) -> None:
     """Search only: retrieve document chunks without LLM generation."""
-    store, _ = _init_retrieval(config)
+    store, _ = _init_retrieval(config, debug=debug)
 
     distance_threshold = config.get("retrieval_distance_threshold")
     enhancer_threshold = None
@@ -398,11 +401,13 @@ def _remove_placeholder(filepath: str) -> None:
         f.write(cleaned)
 
 
-def cmd_ask(config: dict, question: str, use_enhancer: bool = False) -> None:
+def cmd_ask(
+    config: dict, question: str, use_enhancer: bool = False, debug: bool = False
+) -> None:
     if use_enhancer:
         config["query_enhance_enabled"] = True
     store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker = (
-        _init_ask_chat(config)
+        _init_ask_chat(config, debug=debug)
     )
 
     distance_threshold = (
@@ -493,9 +498,9 @@ def cmd_build(config: dict, force: bool = False) -> None:
     print(f"[step] build complete [{time.perf_counter() - t0:.1f}s total]")
 
 
-def cmd_chat(config: dict) -> None:
+def cmd_chat(config: dict, debug: bool = False) -> None:
     store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker = (
-        _init_ask_chat(config)
+        _init_ask_chat(config, debug=debug)
     )
 
     distance_threshold = (
@@ -587,6 +592,9 @@ def main() -> None:
     parser.add_argument(
         "--strict_context", type=str, help="true/false: answer only from context"
     )
+    parser.add_argument(
+        "--debug", action="store_true", help="enable debug output for retrieval"
+    )
     parser.add_argument("question", nargs="*", help="your question")
     args = parser.parse_args()
 
@@ -602,13 +610,16 @@ def main() -> None:
     if args.strict_context is not None:
         config["strict_context"] = args.strict_context.lower() in ("true", "1", "yes")
 
+    # debug: CLI --debug overrides config
+    debug = args.debug or config.get("debug", False)
+
     question = " ".join(args.question)
 
     # Validate mode/question combinations
     if args.search:
         if not question:
             parser.error("--search requires a question")
-        cmd_search(config, question, use_enhancer=args.enhance)
+        cmd_search(config, question, use_enhancer=args.enhance, debug=debug)
     elif args.build:
         if question:
             print("[warn] question ignored with --build", file=sys.stderr)
@@ -618,14 +629,14 @@ def main() -> None:
             print("[warn] question ignored with --rebuild", file=sys.stderr)
         cmd_build(config, force=True)
     elif question:
-        cmd_ask(config, question, use_enhancer=args.enhance)
+        cmd_ask(config, question, use_enhancer=args.enhance, debug=debug)
     else:
         if args.enhance:
             print(
                 "[warn] --enhance ignored without --search or question",
                 file=sys.stderr,
             )
-        cmd_chat(config)
+        cmd_chat(config, debug=debug)
 
 
 if __name__ == "__main__":
