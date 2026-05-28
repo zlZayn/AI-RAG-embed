@@ -218,17 +218,28 @@ class VectorDb:
         self, question: str, k: int = 3, distance_threshold: float = None
     ) -> list[str]:
         """Retrieve top-k document chunks."""
+        if self._debug:
+            print(f"\n[debug] query params: k={k}, threshold={distance_threshold}")
+
         if self._vector_enabled and self._bm25_enabled and self._bm25.ready:
+            if self._debug:
+                print("[debug] query path: hybrid (vector + BM25, RRF fusion)")
             return self._hybrid_query(
                 question, k=k, distance_threshold=distance_threshold
             )
         elif self._vector_enabled:
+            if self._debug:
+                print("[debug] query path: vector-only")
             return self._vector_query(
                 question, k=k, distance_threshold=distance_threshold
             )
         elif self._bm25_enabled and self._bm25.ready:
+            if self._debug:
+                print("[debug] query path: BM25-only")
             return self._bm25_query(question, k=k)
         else:
+            if self._debug:
+                print("[debug] query path: none (vector and BM25 both disabled)")
             return []
 
     def _vector_query(

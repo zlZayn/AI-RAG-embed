@@ -231,7 +231,7 @@
       <button onclick="setMode('search', this)">Search</button>
     </div>
     <div class="input-row">
-      <input id="query" placeholder="输入问题，按 Enter 或点击发送" onkeydown="if(event.key==='Enter') send()">
+      <input id="query" placeholder="输入问题，按 Enter 或点击提问" onkeydown="if(event.key==='Enter') send()">
       <button class="send" id="btn" onclick="send()">Send</button>
     </div>
   </div>
@@ -251,7 +251,7 @@
       $('label').textContent = m.toUpperCase();
       $('query').placeholder = m === 'search'
         ? '输入关键词，按 Enter 或点击检索'
-        : '输入问题，按 Enter 或点击发送';
+        : '输入问题，按 Enter 或点击提问';
     }
 
     function clearOutput() {

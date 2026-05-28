@@ -94,7 +94,7 @@ python rag_qa.py "What is exponential smoothing?"
 python rag_qa.py --enhance "What is exponential smoothing?"
 ```
 
-Use `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context` to override config.json settings temporarily.
+Use `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`, `--debug` to override config settings temporarily. `--debug` prints query params, query path, question rewriting, per-chunk scores, and source previews.
 
 ### Search-Only Mode
 
@@ -107,7 +107,7 @@ python rag_qa.py --search "What is exponential smoothing?"
 python rag_qa.py --search --enhance "What is exponential smoothing?"
 ```
 
-Returns the top `retrieval_k` chunks (default: 3) directly to stdout. With `--enhance`, the query is processed through the enhancer before retrieval, same as `cmd_ask`. See [Query Enhancement](#query-enhancement-enhancer) for mode differences.
+Returns the top `retrieval_k` chunks (default: 3) directly to stdout. With `--enhance`, the query is processed through the enhancer before retrieval, same as `cmd_ask`. See [Query Enhancement](#query-enhancement) for mode differences.
 
 ### Query Tips
 
@@ -189,40 +189,40 @@ Controls how documents are split into chunks for embedding.
 | `line.max_lines` | Max lines per chunk (line mode). Default: `20`. |
 | `line.overlap_lines` | Overlap in lines between adjacent chunks (line mode). Keep below `max_lines // 2` for best break-point quality. Default: `3`. |
 
-### Query Enhancement (`enhancer`)
+### Query Enhancement
 
 Rewrites your question before searching to improve retrieval quality. The enhanced output is used **only for retrieval** -- the answer LLM always receives the original question.
 
 | Key | Description |
 | --- | --- |
 | `query_enhance_enabled` | Enable query enhancement. Default: `false`. |
-| `mode` | `"llm"` = use an LLM API to generate retrieval-optimized paragraphs. `"local"` = use a local MarianMT model (offline, translation only). |
 
-**LLM mode** (`enhancer.llm`): Generates a dense retrieval paragraph covering key terms, related concepts, and likely document content. For follow-up questions, rewrites using conversation history first.
+Enhancement is configured under `retrieval.enhancer`. See the Retrieval section below.
+
+### Retrieval & Reranking
+
+| Key | Description |
+| --- | --- |
+| `retrieval.mode` | Retrieval strategy: `"llm"` = LLM-generated retrieval paragraph. `"local"` = MarianMT translation. `null` = direct retrieval (no enhancement). |
+| `retrieval.k` | Number of chunks to retrieve per query. Default: `3`. |
+| `retrieval.distance_threshold` | Cosine distance threshold for vector retrieval. Chunks with distance above this value are filtered out. Only effective when `vector_enabled` is `true`. Set `null` to disable filtering. Default: `0.3`. |
+| `vector_enabled` | Enable vector (embedding) retrieval. When `false`, the embedding model is not loaded — faster startup, lower memory. Default: `true`. |
+| `bm25_enabled` | Enable BM25 keyword retrieval. Can be used alone or combined with vector search; combined results are merged via Reciprocal Rank Fusion (RRF). Default: `false`. |
+
+**LLM mode** (`retrieval.enhancer.llm`): Generates a dense retrieval paragraph covering key terms, related concepts, and likely document content. For follow-up questions, rewrites using conversation history first.
 
 | Key | Description |
 | --- | --- |
 | `api_base_url`, `api_key`, `model` | LLM API connection settings. |
 | `temperature` | Default: `0.0`. |
 | `thinking_mode` | Default: `false`. |
-| `distance_threshold` | Cosine distance threshold for this mode. Default: `0.2`. |
 
-**Local mode** (`enhancer.local`): Translates the question to `docs_lang` via MarianMT. No term replacement, no context rewrite.
+**Local mode** (`retrieval.enhancer.local`): Translates the question to `docs_lang` via MarianMT. No term replacement, no context rewrite.
 
 | Key | Description |
 | --- | --- |
 | `query_lang` | Language you ask questions in (e.g., `"zh"`, `"en"`). |
 | `model_name` | HuggingFace model ID (optional). Auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` if omitted (zh-en ~599MB, en-zh ~301MB). |
-| `distance_threshold` | Cosine distance threshold for this mode. Default: `0.3`. |
-
-### Retrieval & Reranking
-
-| Key | Description |
-| --- | --- |
-| `vector_enabled` | Enable vector (embedding) retrieval. When `false`, the embedding model is not loaded — faster startup, lower memory. Default: `true`. |
-| `bm25_enabled` | Enable BM25 keyword retrieval. Can be used alone or combined with vector search; combined results are merged via Reciprocal Rank Fusion (RRF). Default: `false`. |
-| `retrieval_k` | Number of chunks to retrieve per query. Default: `3`. |
-| `retrieval_distance_threshold` | Cosine distance threshold for vector retrieval. Chunks with distance above this value are filtered out. Only effective when `vector_enabled` is `true`. Overridden by per-mode `distance_threshold` in the enhancer config when enhancement is enabled. Set `null` to disable filtering. Default: `0.3`. |
 
 At least one of `vector_enabled` or `bm25_enabled` must be `true`. The four combinations:
 

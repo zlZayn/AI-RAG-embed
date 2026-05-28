@@ -27,26 +27,26 @@
     },
     "chroma_persist_dir": "./chroma_db",
     "query_enhance_enabled": true,
-    "enhancer": {
-        "mode": "llm",
-        "local": {
-            "query_lang": "zh",
-            "model_name": "Helsinki-NLP/opus-mt-zh-en",
-            "distance_threshold": 0.3
-        },
-        "llm": {
-            "api_base_url": "https://api.deepseek.com",
-            "api_key": "sk-your-api-key-here",
-            "model": "deepseek-v4-flash",
-            "temperature": 0.0,
-            "thinking_mode": false,
-            "distance_threshold": 0.2
-        }
-    },
     "vector_enabled": true,
     "bm25_enabled": true,
-    "retrieval_k": 3,
-    "retrieval_distance_threshold": 0.3,
+    "retrieval": {
+        "mode": "llm",
+        "k": 3,
+        "distance_threshold": 0.3,
+        "enhancer": {
+            "local": {
+                "query_lang": "zh",
+                "model_name": "Helsinki-NLP/opus-mt-zh-en"
+            },
+            "llm": {
+                "api_base_url": "https://api.deepseek.com",
+                "api_key": "sk-your-api-key-here",
+                "model": "deepseek-v4-flash",
+                "temperature": 0.0,
+                "thinking_mode": false
+            }
+        }
+    },
     "reranker_enabled": false,
     "reranker": {
         "model_name": "BAAI/bge-reranker-v2-m3",

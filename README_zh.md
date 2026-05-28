@@ -94,7 +94,7 @@ python rag_qa.py "什么是指数平滑？"
 python rag_qa.py --enhance "什么是指数平滑？"
 ```
 
-可用 `--retrieval_k`、`--retrieval_distance_threshold`、`--strict_context` 临时覆盖 config.json 中的配置。
+可用 `--retrieval_k`、`--retrieval_distance_threshold`、`--strict_context`、`--debug` 临时覆盖配置。`--debug` 会输出查询参数、查询路径、问题改写、逐 chunk 分数和来源预览。
 
 ### 仅检索模式
 
@@ -107,7 +107,7 @@ python rag_qa.py --search "什么是指数平滑？"
 python rag_qa.py --search --enhance "什么是指数平滑？"
 ```
 
-返回排名前 `retrieval_k` 个片段（默认 3 个）直接输出到标准输出。使用 `--enhance` 时，查询会先经过增强器处理再进行检索，逻辑与问答模式相同。参见[查询增强](#查询增强enhancer)了解模式差异。
+返回排名前 `retrieval_k` 个片段（默认 3 个）直接输出到标准输出。使用 `--enhance` 时，查询会先经过增强器处理再进行检索，逻辑与问答模式相同。参见[查询增强](#查询增强)了解模式差异。
 
 ### 查询技巧
 
@@ -189,40 +189,40 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | `line.max_lines` | 单个片段最大行数（line 模式）。默认值：`20`。 |
 | `line.overlap_lines` | 相邻片段重叠行数（line 模式）。建议小于 `max_lines // 2` 以保证断点质量。默认值：`3`。 |
 
-### 查询增强（`enhancer`）
+### 查询增强
 
 在搜索前改写问题以提高检索质量。增强后的输出**仅用于检索**——答案 LLM 始终接收原始问题。
 
 | 配置项 | 说明 |
 | --- | --- |
 | `query_enhance_enabled` | 启用查询增强。默认值：`false`。 |
-| `mode` | `"llm"` = 使用 LLM API 生成检索优化段落。`"local"` = 使用本地 MarianMT 模型（离线，仅翻译）。 |
 
-**LLM 模式**（`enhancer.llm`）：生成密集检索段落，涵盖关键术语、相关概念和可能的文档内容。对于后续问题，先使用对话历史进行改写。
+增强器配置在 `retrieval.enhancer` 下，详见检索与精排章节。
+
+### 检索与精排
+
+| 配置项 | 说明 |
+| --- | --- |
+| `retrieval.mode` | 检索策略：`"llm"` = LLM 生成检索优化段落。`"local"` = MarianMT 翻译。`null` = 直接检索（不增强）。 |
+| `retrieval.k` | 每次查询检索的片段数。默认值：`3`。 |
+| `retrieval.distance_threshold` | 向量检索的余弦距离阈值，超过此值的 chunk 被过滤。仅 `vector_enabled=true` 时生效。设为 `null` 禁用过滤。默认值：`0.3`。 |
+| `vector_enabled` | 启用向量（embedding）检索。设为 `false` 时不加载 embedding 模型，启动更快、内存更省。默认值：`true`。 |
+| `bm25_enabled` | 启用 BM25 关键词检索。可单独使用，也可与向量检索组合；组合时结果通过 RRF（Reciprocal Rank Fusion）融合排序。默认值：`false`。 |
+
+**LLM 模式**（`retrieval.enhancer.llm`）：生成密集检索段落，涵盖关键术语、相关概念和可能的文档内容。对于后续问题，先使用对话历史进行改写。
 
 | 配置项 | 说明 |
 | --- | --- |
 | `api_base_url`、`api_key`、`model` | LLM API 连接设置。 |
 | `temperature` | 默认值：`0.0`。 |
 | `thinking_mode` | 默认值：`false`。 |
-| `distance_threshold` | 此模式的余弦距离阈值。默认值：`0.2`。 |
 
-**本地模式**（`enhancer.local`）：通过 MarianMT 将问题翻译为 `docs_lang` 语言。不替换术语，不改写上下文。
+**本地模式**（`retrieval.enhancer.local`）：通过 MarianMT 将问题翻译为 `docs_lang` 语言。不替换术语，不改写上下文。
 
 | 配置项 | 说明 |
 | --- | --- |
 | `query_lang` | 你提问使用的语言（如 `"zh"`、`"en"`）。 |
 | `model_name` | HuggingFace 模型 ID（可选）。省略时自动选择 `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`（zh-en 约 599MB，en-zh 约 301MB）。 |
-| `distance_threshold` | 此模式的余弦距离阈值。默认值：`0.3`。 |
-
-### 检索与精排
-
-| 配置项 | 说明 |
-| --- | --- |
-| `vector_enabled` | 启用向量（embedding）检索。设为 `false` 时不加载 embedding 模型，启动更快、内存更省。默认值：`true`。 |
-| `bm25_enabled` | 启用 BM25 关键词检索。可单独使用，也可与向量检索组合；组合时结果通过 RRF（Reciprocal Rank Fusion）融合排序。默认值：`false`。 |
-| `retrieval_k` | 每次查询检索的片段数。默认值：`3`。 |
-| `retrieval_distance_threshold` | 向量检索的余弦距离阈值，超过此值的 chunk 被过滤。仅 `vector_enabled=true` 时生效。启用增强时，会被增强器配置中各模式的 `distance_threshold` 覆盖。设为 `null` 禁用过滤。默认值：`0.3`。 |
 
 `vector_enabled` 和 `bm25_enabled` 至少启用一种。四种组合：
 

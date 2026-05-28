@@ -7,10 +7,10 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import NamedTuple
 
+from lib.doc_loader import load_documents
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-from lib.doc_loader import load_documents
 
 
 def _import_lib():
@@ -208,6 +208,7 @@ def _retrieve_context(
     messages_history=None,
     reranker=None,
     reranker_top_k=None,
+    debug=False,
 ) -> RetrieveResult:
     """检索相关文档块。"""
     rewritten_question = question
@@ -219,8 +220,21 @@ def _retrieve_context(
         rewritten_question = query_enhancer.enhance(question, messages_history)
         enhance_label = query_enhancer.label
 
+    if debug:
+        print(f"\n[debug] original question: {question}")
+        if rewritten_question != question:
+            print(f"[debug] rewritten question: {rewritten_question}")
+        print(
+            f"[debug] retrieval_k={retrieval_k}, threshold={retrieval_distance_threshold}"
+        )
+
     # Retrieve more candidates when reranker will refine
     k_for_search = retrieval_k * 4 if reranker else retrieval_k
+
+    if debug and reranker:
+        print(
+            f"[debug] reranker active: searching {k_for_search} candidates, will keep top {reranker_top_k or retrieval_k}"
+        )
 
     print("\r\033[K[step] retrieving... ", end="", flush=True)
     chunks = store.query(
@@ -236,7 +250,7 @@ def _retrieve_context(
     if reranker:
         print(f"\r\033[K[step] reranking {len(chunks)} chunks... ", end="", flush=True)
         top_k = reranker_top_k or retrieval_k
-        chunks = reranker.rerank(rewritten_question, chunks, top_k=top_k)
+        chunks = reranker.rerank(rewritten_question, chunks, top_k=top_k, debug=debug)
 
     print(f"\r\033[K[step] retrieved {len(chunks)} chunks, generating...")
 
@@ -266,26 +280,43 @@ def _init_ask_chat(config: dict, debug: bool = False):
             thinking_mode=config["llm"].get("thinking_mode", False),
         )
 
-    query_enhancer, enhancer_threshold = _init_enhancer(config)
+    query_enhancer = _init_enhancer(config)
     reranker = _init_reranker(config)
 
     system_prompt = _build_system_prompt(
         config.get("system_rules", ""), config.get("strict_context", False)
     )
 
-    return store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker
+    return store, llm, query_enhancer, system_prompt, reranker
+
+
+def _get_retrieval_cfg(config: dict) -> dict:
+    """Get retrieval config, handling legacy format with deprecation warning."""
+    if "retrieval" in config:
+        return config["retrieval"]
+    print(
+        "[warn] top-level retrieval_k/retrieval_distance_threshold/enhancer "
+        "is deprecated, use retrieval.* instead"
+    )
+    return {
+        "mode": config.get("enhancer", {}).get("mode"),
+        "k": config.get("retrieval_k", 3),
+        "distance_threshold": config.get("retrieval_distance_threshold"),
+        "enhancer": config.get("enhancer", {}),
+    }
 
 
 def _init_enhancer(config: dict):
-    """Initialize query enhancer from config. Returns (enhancer, threshold) or (None, None)."""
+    """Initialize query enhancer from config. Returns enhancer or None."""
     if not config.get("query_enhance_enabled", False):
-        return None, None
+        return None
 
     from lib.query_enhancer import QueryEnhancer
     from lib.llm_api import LlmApi
 
-    enhancer_cfg = config["enhancer"]
-    mode = enhancer_cfg.get("mode")
+    retrieval_cfg = _get_retrieval_cfg(config)
+    enhancer_cfg = retrieval_cfg.get("enhancer", {})
+    mode = retrieval_cfg.get("mode")
     docs_lang = config.get("docs_lang", "en")
 
     with _timed("Initializing query enhancer"):
@@ -298,9 +329,7 @@ def _init_enhancer(config: dict):
                 docs_lang=docs_lang,
                 model_name=local_cfg.get("model_name"),
             )
-            enhancer = QueryEnhancer(translator=translator, docs_lang=docs_lang)
-            threshold = local_cfg.get("distance_threshold")
-            return enhancer, threshold
+            return QueryEnhancer(translator=translator, docs_lang=docs_lang)
         elif mode == "llm":
             llm_cfg = enhancer_cfg["llm"]
             enhancer_llm = LlmApi(
@@ -310,9 +339,7 @@ def _init_enhancer(config: dict):
                 temperature=llm_cfg.get("temperature", 0.0),
                 thinking_mode=llm_cfg.get("thinking_mode", False),
             )
-            enhancer = QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
-            threshold = llm_cfg.get("distance_threshold")
-            return enhancer, threshold
+            return QueryEnhancer(llm_api=enhancer_llm, docs_lang=docs_lang)
         else:
             raise ValueError(
                 f"Invalid enhancer mode: '{mode}'. Must be 'local' or 'llm'."
@@ -336,20 +363,27 @@ def cmd_search(
     """Search only: retrieve document chunks without LLM generation."""
     store, _ = _init_retrieval(config, debug=debug)
 
-    distance_threshold = config.get("retrieval_distance_threshold")
-    enhancer_threshold = None
+    retrieval_cfg = _get_retrieval_cfg(config)
+    distance_threshold = retrieval_cfg.get("distance_threshold")
+    original_question = question
 
     if use_enhancer:
-        enhancer, enhancer_threshold = _init_enhancer(config)
+        enhancer = _init_enhancer(config)
         if enhancer:
             question = enhancer.enhance(question)
             print(f"[info] {enhancer.label}: {question}")
-            if enhancer_threshold is not None and not config.get("_cli_threshold"):
-                distance_threshold = enhancer_threshold
+
+    if debug:
+        print(f"\n[debug] original question: {original_question}")
+        if question != original_question:
+            print(f"[debug] rewritten question: {question}")
+        print(
+            f"[debug] retrieval_k={retrieval_cfg.get('k', 3)}, threshold={distance_threshold}"
+        )
 
     reranker = _init_reranker(config)
 
-    retrieval_k = config.get("retrieval_k", 3)
+    retrieval_k = retrieval_cfg.get("k", 3)
     k_for_search = retrieval_k * 4 if reranker else retrieval_k
     chunks = store.query(
         question, k=k_for_search, distance_threshold=distance_threshold
@@ -362,7 +396,7 @@ def cmd_search(
     if reranker:
         print(f"[step] reranking {len(chunks)} chunks... ", end="", flush=True)
         top_k = config.get("reranker", {}).get("top_k") or retrieval_k
-        chunks = reranker.rerank(question, chunks, top_k=top_k)
+        chunks = reranker.rerank(question, chunks, top_k=top_k, debug=debug)
         print("done")
 
     for i, chunk in enumerate(chunks, 1):
@@ -406,26 +440,23 @@ def cmd_ask(
 ) -> None:
     if use_enhancer:
         config["query_enhance_enabled"] = True
-    store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker = (
-        _init_ask_chat(config, debug=debug)
+    store, llm, query_enhancer, system_prompt, reranker = _init_ask_chat(
+        config, debug=debug
     )
 
-    distance_threshold = (
-        enhancer_threshold
-        if enhancer_threshold is not None and not config.get("_cli_threshold")
-        else config.get("retrieval_distance_threshold")
-    )
+    retrieval_cfg = _get_retrieval_cfg(config)
 
     chunks, messages, rewritten_question, enhance_label = _retrieve_context(
         store,
         llm,
         question,
         system_prompt,
-        retrieval_k=config.get("retrieval_k", 3),
-        retrieval_distance_threshold=distance_threshold,
+        retrieval_k=retrieval_cfg.get("k", 3),
+        retrieval_distance_threshold=retrieval_cfg.get("distance_threshold"),
         query_enhancer=query_enhancer,
         reranker=reranker,
         reranker_top_k=config.get("reranker", {}).get("top_k"),
+        debug=debug,
     )
     if not chunks:
         return
@@ -499,15 +530,11 @@ def cmd_build(config: dict, force: bool = False) -> None:
 
 
 def cmd_chat(config: dict, debug: bool = False) -> None:
-    store, llm, query_enhancer, system_prompt, enhancer_threshold, reranker = (
-        _init_ask_chat(config, debug=debug)
+    store, llm, query_enhancer, system_prompt, reranker = _init_ask_chat(
+        config, debug=debug
     )
 
-    distance_threshold = (
-        enhancer_threshold
-        if enhancer_threshold is not None and not config.get("_cli_threshold")
-        else config.get("retrieval_distance_threshold")
-    )
+    retrieval_cfg = _get_retrieval_cfg(config)
 
     print("\nAsk a question. Be specific. /quit or /q to quit.\n")
 
@@ -535,12 +562,13 @@ def cmd_chat(config: dict, debug: bool = False) -> None:
             llm,
             question,
             system_prompt,
-            retrieval_k=config.get("retrieval_k", 3),
-            retrieval_distance_threshold=distance_threshold,
+            retrieval_k=retrieval_cfg.get("k", 3),
+            retrieval_distance_threshold=retrieval_cfg.get("distance_threshold"),
             query_enhancer=query_enhancer,
             messages_history=recent_history,
             reranker=reranker,
             reranker_top_k=config.get("reranker", {}).get("top_k"),
+            debug=debug,
         )
         if not chunks:
             continue
@@ -603,9 +631,11 @@ def main() -> None:
 
     # CLI overrides
     if args.retrieval_k is not None:
-        config["retrieval_k"] = args.retrieval_k
+        config.setdefault("retrieval", {})["k"] = args.retrieval_k
     if args.retrieval_distance_threshold is not None:
-        config["retrieval_distance_threshold"] = args.retrieval_distance_threshold
+        config.setdefault("retrieval", {})["distance_threshold"] = (
+            args.retrieval_distance_threshold
+        )
         config["_cli_threshold"] = True
     if args.strict_context is not None:
         config["strict_context"] = args.strict_context.lower() in ("true", "1", "yes")

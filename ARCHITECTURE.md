@@ -86,17 +86,15 @@ lib/
 | `chunking` | Indexing | Chunking config: `mode` (`"auto"` / `"fixed"`), plus mode-specific sub-keys (`auto.target_chars`, `fixed.split_by`, `fixed.char`, `fixed.line`). See `config_example.json`. |
 | `embedding_model_name` | Indexing | Embedding model config. String (single model) or object mapping `docs_lang` values to model IDs (e.g., `{"zh": "...", "en": "..."}`). Auto-selected by `docs_lang`. |
 | `chroma_persist_dir` | Indexing | Chroma persistence directory |
-| `query_enhance_enabled` | Enhancement | Enable query enhancement (Default: `false`) |
-| `enhancer` | Enhancement | Enhancer config with mode switch: `"llm"` (retrieval-optimized paragraph) or `"local"` (MarianMT translation). Each mode has its own `distance_threshold`. |
+| `query_enhance_enabled` | Retrieval | Enable query enhancement (Default: `false`) |
+| `retrieval` | Retrieval | Retrieval config block: `mode` (`"llm"` / `"local"` / `null`), `k` (top-k, Default: `3`), `distance_threshold` (cosine distance filter, `null` disables, Default: `0.3`), `enhancer` (mode-specific sub-config for local/llm). |
 | `vector_enabled` | Retrieval | Enable vector (embedding) retrieval. When `false`, the embedding model is not loaded. Default: `true` |
 | `bm25_enabled` | Retrieval | Enable BM25 keyword retrieval. Can be used alone or combined with vector search; combined results merged via RRF. At least one of `vector_enabled` or `bm25_enabled` must be `true`. Default: `false` |
-| `retrieval_k` | Retrieval | Number of chunks to retrieve (Default: `3`) |
-| `retrieval_distance_threshold` | Retrieval | Cosine distance threshold for vector retrieval. Only effective when `vector_enabled` is `true`. Overridden by per-mode `distance_threshold` in enhancer config when enhancement is enabled. `null` disables filtering (Default: `0.3`) |
 | `reranker_enabled` | Retrieval | Enable cross-encoder reranker for precision re-ranking (Default: `false`) |
 | `reranker` | Retrieval | Reranker config: `model_name` (Default: `"BAAI/bge-reranker-v2-m3"`), `top_k` (Default: `null`, uses `retrieval_k`) |
 | `llm` | Generation | LLM model config (api_base_url, api_key, model, temperature (Default: `0.3`), thinking_mode) |
 | `max_history_rounds` | Behavior | Recent conversation rounds to keep (Default: `10`) |
-| `debug` | Behavior | Enable debug output for retrieval (chunk scores, sources, previews). Can be overridden by `--debug` CLI flag. (Default: `false`) |
+| `debug` | Behavior | Enable debug output for retrieval. Prints query params, query path (hybrid/vector/BM25), original vs rewritten question, per-chunk scores (distance, BM25, RRF, reranker), and source previews. Can be overridden by `--debug` CLI flag. (Default: `false`) |
 | `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (Default: `false`) |
 | `system_rules` | Behavior | Additional system prompt rules (Default: `""`) |
 
@@ -116,7 +114,7 @@ python rag_qa.py --build               →  cmd_build()            (incremental 
 python rag_qa.py --rebuild             →  cmd_build(force=True)  (full rebuild)
 ```
 
-Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`, `--enhance`, `--debug`. These override the corresponding `config.json` fields; if omitted, config values (or code defaults) are used. CLI override takes highest priority, even over per-mode enhancer thresholds.
+Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`, `--enhance`, `--debug`. These override the corresponding `retrieval.*` fields in `config.json`; if omitted, config values (or code defaults) are used. CLI override takes highest priority.
 
 Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing `chunking` requires a full `--rebuild`; changing `embedding_model_name` is auto-detected by `--build` and triggers a full rebuild automatically.
 
@@ -126,7 +124,7 @@ Progress messages use the `_timed(label)` context manager for consistent `[step]
 
 ### _init_enhancer(config)
 
-Shared helper that initializes the query enhancer from config. Returns `(enhancer, threshold)` tuple — `(None, None)` if `query_enhance_enabled` is `false`. The `threshold` is the per-mode `distance_threshold` from the active enhancer config (local or llm). Used by both `cmd_search(use_enhancer=True)` and `_init_ask_chat()`. Callers use the enhancer threshold when available, falling back to the global `retrieval_distance_threshold`.
+Shared helper that initializes the query enhancer from `retrieval.enhancer` config. Returns `enhancer` or `None` if `query_enhance_enabled` is `false`. The retrieval `mode` and `distance_threshold` are read from the `retrieval` config block independently. Used by both `cmd_search(use_enhancer=True)` and `_init_ask_chat()`.
 
 ## Build Workflow
 
@@ -184,6 +182,7 @@ Both `cmd_ask` and `cmd_chat` share `_init_ask_chat()` for engine initialization
 ```text
 cmd_search(question, use_enhancer=True)
 ├─► _init_retrieval(config)          →  store
+├─► _get_retrieval_cfg(config)         →  retrieval_cfg
 ├─► _init_enhancer(config)             →  enhancer
 ├─► enhancer.enhance(question)         →  rewritten_question
 │   (same logic as _retrieve_context: LLM retrieval-paragraph, or local MarianMT)

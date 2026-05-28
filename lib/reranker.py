@@ -13,7 +13,9 @@ class Reranker:
     def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3"):
         self._model = CrossEncoder(model_name, max_length=512)
 
-    def rerank(self, query: str, chunks: list[str], top_k: int) -> list[str]:
+    def rerank(
+        self, query: str, chunks: list[str], top_k: int, debug: bool = False
+    ) -> list[str]:
         """Re-rank chunks by relevance to query, return top_k results.
 
         Args:
@@ -31,4 +33,13 @@ class Reranker:
         scores = self._model.predict(pairs)
 
         ranked = sorted(zip(chunks, scores), key=lambda pair: pair[1], reverse=True)
+
+        if debug:
+            print("\n[debug] reranker scores")
+            for i, (chunk, score) in enumerate(ranked):
+                kept = " *" if i < top_k else ""
+                print(f"[debug]   chunk {i + 1}: score={score:.4f}{kept}")
+                print(f"[debug]     preview: {chunk[:80]}...")
+            print(f"[debug]   (* = kept, top {top_k} of {len(chunks)})")
+
         return [chunk for chunk, _ in ranked[:top_k]]
