@@ -25,8 +25,10 @@ class LlmApi:
 
     def generate_stream(self, messages: list[dict]):
         extra_body = {}
-        if self._thinking_mode:
-            extra_body["thinking_mode"] = True
+        if self._thinking_mode is True:
+            extra_body["thinking"] = {"type": "enabled"}
+        elif self._thinking_mode is False:
+            extra_body["thinking"] = {"type": "disabled"}
 
         for attempt in range(MAX_RETRIES):
             try:
