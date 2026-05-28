@@ -96,7 +96,7 @@ lib/
 | `max_history_rounds` | Behavior | Recent conversation rounds to keep (Default: `10`) |
 | `debug` | Behavior | Enable debug output for retrieval. Prints query params, query path (hybrid/vector/BM25), original vs rewritten question, per-chunk scores (distance, BM25, RRF, reranker), and source previews. Can be overridden by `--debug` CLI flag. (Default: `false`) |
 | `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (Default: `false`) |
-| `system_rules` | Behavior | Additional system prompt rules (Default: `""`) |
+| `system_rules` | Behavior | Additional system prompt rules. **Deprecated** — edit `lib/prompt_templates.py` instead. (Default: `""`) |
 
 Relative paths (`./`) are resolved against the project root.
 
@@ -235,8 +235,9 @@ _retrieve_context(..., retrieval_distance_threshold=None, reranker=None) -> Retr
 └─► _stream_answer(llm, messages)
     llm.generate_stream(messages) → iter[str]
     POST {base_url}/chat/completions (stream=True)
-    messages: [system prompt, (conversation history ...), {user:
-      "Context:\n{chunks}\n\nQuestion: {original_question}"}]
+    messages: [system, ...conversation_history?, user]
+    system: filled template with {question} and {context}
+    user:   original question (raw)
 
 Note: the enhanced question is used **only for retrieval** (store.query).
 The answer LLM always receives the **original question** to preserve the user's language.
@@ -246,15 +247,26 @@ If no relevant chunks are found, the system prints a message and skips the round
 
 ## System Prompt
 
-Two modes controlled by `strict_context`:
+All prompt templates and formatting logic are centralized in `lib/prompt_templates.py`.
 
-**strict_context = false** (default):
-> You are a helpful assistant. Use the provided context to enrich your answer, but also draw on your own knowledge when the context is insufficient. If the context is provided, prefer it over your own knowledge for factual claims.
+**Default** — `SYSTEM_PROMPT_DEFAULT` (the single source of truth):
+> A comprehensive template with relevance assessment, formatting rules (headings, no emoji, code blocks, lists, math), and [general knowledge] / [inferred] annotation guidelines. Contains `{question}` and `{context}` placeholders.
 
-**strict_context = true**:
-> You are a helpful assistant. Answer the user's question based ONLY on the provided context. If the answer is not in the context, say 'I don't know'.
+**Backward-compatible resolution order:**
 
-If `system_rules` is set, it is appended after the base prompt.
+1. `config["system_prompt"]` — used with deprecation warning (config prompt text is no longer maintained)
+2. `strict_context` + `system_rules` — legacy fallback, also deprecated
+3. `SYSTEM_PROMPT_DEFAULT` from `lib/prompt_templates.py` — the default
+
+The assembly flow in `rag_qa.py`:
+
+```text
+build_system_prompt(config)           → template string (with {question}, {context})
+    ↓
+build_qa_messages(template, q, ctx)  → [system, ...history?, user]
+    ├─ format_system_prompt()        → fill {question}, {context}
+    └─ wrap in messages array
+```
 
 ## Chunk Sanitization
 

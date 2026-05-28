@@ -253,7 +253,7 @@ The LLM that generates the final answer using the retrieved chunks. Fields: `api
 | --- | --- |
 | `max_history_rounds` | Recent conversation rounds to keep for context. Default: `10`. |
 | `strict_context` | `true` = answer **only** from retrieved chunks. `false` = LLM may supplement with its own knowledge. Default: `false`. |
-| `system_rules` | Extra instructions appended to the system prompt. Default: `""`. |
+| `system_rules` | Extra instructions appended to the system prompt. **Deprecated**, edit `lib/prompt_templates.py` instead. Default: `""`. |
 
 ## Document Filtering
 

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from lib.doc_loader import load_documents
+from lib.prompt_templates import build_qa_messages, build_system_prompt
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -72,19 +73,6 @@ def _init_retrieval(config: dict, debug: bool = False):
     return store, LlmApi
 
 
-_SYSTEM_BASE_STRICT = (
-    "You are a helpful assistant. Answer the user's question based ONLY on the provided context. "
-    "If the answer is not in the context, say 'I don't know'. "
-    "Always respond in the same language as the user's question."
-)
-
-_SYSTEM_BASE = (
-    "You are a helpful assistant. Use the provided context to enrich your answer, "
-    "but also draw on your own knowledge when the context is insufficient. "
-    "If the context is provided, prefer it over your own knowledge for factual claims. "
-    "Always respond in the same language as the user's question."
-)
-
 _PROJECT_DIR = os.path.dirname(__file__)
 
 
@@ -105,13 +93,6 @@ def _resolve_path(config: dict, key: str) -> str:
     if path.startswith("./") or path.startswith(".\\"):
         return os.path.join(_PROJECT_DIR, path[2:])
     return path
-
-
-def _build_system_prompt(rules: str, strict_context: bool = False) -> str:
-    base = _SYSTEM_BASE_STRICT if strict_context else _SYSTEM_BASE
-    if not rules:
-        return base
-    return base + "\n\n" + rules
 
 
 def _sanitize_name(text: str, max_len: int = 60) -> str:
@@ -255,15 +236,7 @@ def _retrieve_context(
     print(f"\r\033[K[step] retrieved {len(chunks)} chunks, generating...")
 
     context = "\n\n".join(chunks)
-    messages = [{"role": "system", "content": system_prompt}]
-    if messages_history:
-        messages.extend(messages_history)
-    messages.append(
-        {
-            "role": "user",
-            "content": f"Context:\n{context}\n\nQuestion: {question}",
-        },
-    )
+    messages = build_qa_messages(system_prompt, question, context, messages_history)
 
     return RetrieveResult(chunks, messages, rewritten_question, enhance_label)
 
@@ -283,9 +256,7 @@ def _init_ask_chat(config: dict, debug: bool = False):
     query_enhancer = _init_enhancer(config)
     reranker = _init_reranker(config)
 
-    system_prompt = _build_system_prompt(
-        config.get("system_rules", ""), config.get("strict_context", False)
-    )
+    system_prompt = build_system_prompt(config)
 
     return store, llm, query_enhancer, system_prompt, reranker
 

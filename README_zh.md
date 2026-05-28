@@ -253,7 +253,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | --- | --- |
 | `max_history_rounds` | 保留的最近对话轮数，用于上下文。默认值：`10`。 |
 | `strict_context` | `true` = **仅**基于检索到的片段回答。`false` = LLM 可补充自身知识。默认值：`false`。 |
-| `system_rules` | 附加到系统提示词的额外指令。默认值：`""`。 |
+| `system_rules` | 附加到系统提示词的额外指令。**已废弃**，请直接编辑 `lib/prompt_templates.py`。默认值：`""`。 |
 
 ## 文档过滤
 
