@@ -34,6 +34,26 @@ Local RAG system with two phases:
 4. Send **original** question + retrieved chunks to a remote LLM as context (enhanced question is retrieval-only, preserving the user's language for the answer)
 5. Generate answer and save to `output/` directory
 
+## Model Slots
+
+The system has 3 local model slots and 1 remote LLM slot. Each local slot is gated by its own config flag; disabled slots do not import or load their model. This matters for startup time and memory — in BM25-only mode, no local models are loaded at all.
+
+| Slot | Config Gate | Engine | Loaded When | Size (typical) |
+| --- | --- | --- | --- | --- |
+| Embedding | `vector_enabled` | `SentenceTransformer` (embed_engine.py) | `vector_enabled=true` | 92 MB – 641 MB |
+| Enhancer | `query_enhance_enabled` | `MarianMT` (local_translator.py) or `LlmApi` (query_enhancer.py) | `query_enhance_enabled=true` | ~300–600 MB (local) / 0 (remote) |
+| Reranker | `reranker_enabled` | `CrossEncoder` (reranker.py) | `reranker_enabled=true` | ~2.2 GB |
+| LLM | always active | `LlmApi` (llm_api.py) | always (for ask/chat modes) | 0 (remote API) |
+
+Lazy import rules:
+
+- `sentence-transformers` (and its `torch` dependency) is imported only when `vector_enabled=true`. In BM25-only mode, the ~12s torch import is skipped entirely.
+- `transformers` + `sentencepiece` for MarianMT is imported only when `query_enhance_enabled=true` and `enhancer.mode=local`.
+- `CrossEncoder` for reranking is imported only when `reranker_enabled=true`.
+- `openai` for LLM API is imported by `_init_retrieval()` unconditionally, but the LLM client itself is only instantiated in `cmd_ask` and `cmd_chat` (not in `cmd_search` or `cmd_build`).
+
+When enhancer is in local mode, it loads a MarianMT model; in LLM mode it calls the remote API (shared with the LLM slot). Maximum local models loaded simultaneously: 3 (embedding + local enhancer + reranker). Minimum: 0 (BM25-only search).
+
 ## Directory Structure
 
 ```text

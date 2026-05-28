@@ -121,6 +121,19 @@ The enhancer rewrites queries for better vector similarity, but it cannot retrie
 
 Edit `config.json` to configure the system. Relative paths (`./`) are resolved against the project root. "Default" below refers to the code's hardcoded fallback when a key is omitted.
 
+### Model Slots
+
+The system has 3 local model slots and 1 remote LLM slot. Each local slot is gated by its own config flag — disabled slots never load.
+
+| Slot | Config | Type | Purpose |
+| --- | --- | --- | --- |
+| Embedding | `vector_enabled` | Local | Vectorize documents and queries for similarity search |
+| Enhancer | `query_enhance_enabled` | Local or Remote | Rewrite or translate queries before retrieval |
+| Reranker | `reranker_enabled` | Local | Re-score retrieved chunks with a cross-encoder |
+| LLM | always on | Remote (API) | Generate the final answer |
+
+Enhancer in local mode loads a MarianMT model; in LLM mode it calls the remote API (shared with the LLM slot). All three local slots can be active simultaneously. A BM25-only setup loads zero local models.
+
 ### Document & Indexing
 
 | Key | Description |
