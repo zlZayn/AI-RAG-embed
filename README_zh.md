@@ -128,7 +128,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 }
 ```
 
-使用按语言映射格式时，修改 `docs_lang` 会自动切换模型和查询前缀。模型维度变化会被自动处理——`--build` 检测到切换后会从头重建索引。
+使用按语言映射格式时，修改 `docs_lang` 会自动切换模型和查询前缀。模型维度变化会被自动处理——`--build` 检测到切换后会从头重建索引。首次运行自动下载模型到本地缓存：`bge-small-zh-v1.5` 约 92MB，`mxbai-embed-large-v1` 约 641MB。
 
 ### 分块配置（`chunking`）
 
@@ -183,7 +183,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | 配置项 | 说明 |
 | --- | --- |
 | `query_lang` | 你提问使用的语言（如 `"zh"`、`"en"`）。 |
-| `model_name` | HuggingFace 模型 ID（可选）。省略时自动选择 `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`。 |
+| `model_name` | HuggingFace 模型 ID（可选）。省略时自动选择 `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}`（zh-en 约 599MB，en-zh 约 301MB）。 |
 | `distance_threshold` | 此模式的余弦距离阈值。默认值：`0.3`。 |
 
 ### 检索与精排
@@ -204,7 +204,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | `false` | `true` | 纯 BM25 检索（不加载 embedding 模型） |
 | `false` | `false` | 报错：至少启用一种 |
 
-**精排重排序**（可选）：两阶段检索——向量搜索先召回 `retrieval_k * 4` 个候选，再用 cross-encoder 按相关性精排后截取最终的 `retrieval_k` 个。对 bi-encoder 余弦相似度不足以区分的场景，能显著提升精度。
+**精排重排序**（可选）：两阶段检索——先用 `retrieval_k * 4` 条候选粗筛（无论向量还是 BM25），再用 cross-encoder 对每条候选与查询的联合语义打分，取前 `retrieval_k` 条送入 LLM。适合术语匹配不精确、语义相关性要求高的场景。
 
 | 配置项 | 说明 |
 | --- | --- |
@@ -212,7 +212,7 @@ python rag_qa.py --search --enhance "什么是指数平滑？"
 | `reranker.model_name` | cross-encoder 模型 ID。默认值：`"BAAI/bge-reranker-v2-m3"`。 |
 | `reranker.top_k` | 精排后的片段数。默认值：`null`（使用 `retrieval_k`）。 |
 
-> **性能影响**：GPU 上增加约 100-300ms，CPU 上增加约 500-1000ms。首次加载会下载模型（约 1.1GB），后续使用本地缓存。
+> **首次加载**：启动时下载模型（约 2.2GB）到本地 HuggingFace 缓存，之后直接读缓存。**每轮查询耗时**：cross-encoder 打分阶段约增加 1-2s（CPU），80 条候选约 1.8s，候选数越多耗时线性增长。
 
 ### 答案生成（`llm`）
 
@@ -297,6 +297,14 @@ lib/
 3. 验证：`python -c "import torch; print(torch.cuda.is_available())"` -- 应输出 `True`
 
 没有 GPU 时一切照常运行，但**速度会慢很多**。
+
+### 模型缓存
+
+所有本地模型首次运行自动下载到 `~/.cache/huggingface/hub/`，之后直接读缓存。查看已缓存模型及大小：
+
+```bash
+du -sh ~/.cache/huggingface/hub/models--* | awk '{sub(/.*models--/, "", $2); sub(/--/, "/", $2); print $2": "$1}'
+```
 
 ---
 

@@ -331,7 +331,7 @@ EmbedEngine(model_name, lang="en")
 
 - Wraps `SentenceTransformer`.
 - Sets `HF_ENDPOINT=https://hf-mirror.com` via `os.environ.setdefault` (China mirror, does not override user-set values).
-- Model loaded with `local_files_only=True` first, falls back to network download if not cached.
+- Model loaded with `local_files_only=True` first, falls back to network download if not cached. Typical sizes: `bge-small-zh-v1.5` ~92 MB, `mxbai-embed-large-v1` ~641 MB.
 - Query prefix is language-dependent, selected by `lang` parameter (from `docs_lang` config):
   - `"zh"`: `"为这个句子生成表示以用于检索中文文档: "`
   - `"en"`: `"Represent this sentence for searching relevant passages: "`
@@ -419,7 +419,7 @@ LocalTranslator(query_lang, docs_lang, model_name=None)
 - `model_name`: explicit HuggingFace model ID. If `None`, auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` (e.g., `query_lang="zh"`, `docs_lang="en"` → `Helsinki-NLP/opus-mt-zh-en`). To use a different model series, pass `model_name` explicitly in `config.json`.
 - `HF_ENDPOINT` set to `https://hf-mirror.com` via `os.environ.setdefault` (China mirror, does not override user-set values).
 - Class-level cache (`_cache` dict): keyed by model name. Same language pair shares one loaded model across all instances within the process.
-- First load downloads from HuggingFace (approx. 300 MB). Subsequent loads read from the local HuggingFace cache (`~/.cache/huggingface/`).
+- First load downloads from HuggingFace (approx. 300-600 MB depending on language pair). Subsequent loads read from the local HuggingFace cache (`~/.cache/huggingface/`).
 - `translate()`: tokenizes input, runs `model.generate()`, decodes output tokens. Returns the translated string.
 
 ### lib/reranker.py
@@ -430,9 +430,9 @@ Reranker(model_name="BAAI/bge-reranker-v2-m3")
 ```
 
 - Wraps `sentence_transformers.CrossEncoder` for precision re-ranking of retrieved chunks.
-- Two-stage retrieval: vector search (bi-encoder) retrieves `k * 4` candidates, cross-encoder reranks and trims to final `top_k`.
-- Cross-encoder encodes (query, chunk) pairs jointly with full attention interaction, yielding higher precision than bi-encoder cosine similarity alone.
-- Model loaded with `max_length=512`. First load downloads from HuggingFace; subsequent loads use local cache.
+- Two-stage retrieval: coarse retrieval of `k * 4` candidates (vector or BM25), then cross-encoder jointly scores each pair and trims to final `top_k`.
+- Cross-encoder encodes (query, chunk) pairs with full attention interaction, yielding higher precision than bi-encoder cosine similarity or keyword matching alone.
+- Model download: ~2.2 GB. Loaded with `max_length=512`. First load downloads from HuggingFace; subsequent loads use local cache.
 - `rerank()`: scores each (query, chunk) pair, sorts by score descending, returns top_k chunks.
 - Initialized by `_init_reranker(config)` when `reranker_enabled` is `true`. Used by `_retrieve_context()` and `cmd_search()`.
 
@@ -452,15 +452,6 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 ```
 
 Verify: `torch.cuda.is_available()` must be `True`.
-
-### sentence-transformers Version
-
-Use 3.x, not 5.x. Version 5.x depends on `torchcodec` (requires FFmpeg, not needed for text embeddings). If you hit `Could not load libtorchcodec`:
-
-```bash
-pip uninstall torchcodec sentence-transformers -y
-pip install "sentence-transformers>=3.0,<5.0"
-```
 
 ### HuggingFace Mirror (China)
 

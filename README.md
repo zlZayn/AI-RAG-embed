@@ -128,7 +128,7 @@ Edit `config.json` to configure the system. Relative paths (`./`) are resolved a
 }
 ```
 
-When using the per-language format, changing `docs_lang` automatically switches the model and query prefix. Model dimension changes are handled automatically -- `--build` detects the switch and rebuilds the index from scratch.
+When using the per-language format, changing `docs_lang` automatically switches the model and query prefix. Model dimension changes are handled automatically -- `--build` detects the switch and rebuilds the index from scratch. Models are downloaded to local cache on first run: `bge-small-zh-v1.5` ~92MB, `mxbai-embed-large-v1` ~641MB.
 
 ### Chunking (`chunking`)
 
@@ -183,7 +183,7 @@ Rewrites your question before searching to improve retrieval quality. The enhanc
 | Key | Description |
 | --- | --- |
 | `query_lang` | Language you ask questions in (e.g., `"zh"`, `"en"`). |
-| `model_name` | HuggingFace model ID (optional). Auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` if omitted. |
+| `model_name` | HuggingFace model ID (optional). Auto-selects `Helsinki-NLP/opus-mt-{query_lang}-{docs_lang}` if omitted (zh-en ~599MB, en-zh ~301MB). |
 | `distance_threshold` | Cosine distance threshold for this mode. Default: `0.3`. |
 
 ### Retrieval & Reranking
@@ -204,7 +204,7 @@ At least one of `vector_enabled` or `bm25_enabled` must be `true`. The four comb
 | `false` | `true` | BM25-only retrieval (no embedding model loaded) |
 | `false` | `false` | Error: at least one must be enabled |
 
-**Reranker** (optional): Two-stage retrieval -- vector search retrieves `retrieval_k * 4` candidates, then a cross-encoder reranks by relevance and trims to the final `retrieval_k`. Improves precision where bi-encoder cosine similarity is insufficient.
+**Reranker** (optional): Two-stage retrieval -- coarse retrieval of `retrieval_k * 4` candidates (vector or BM25), then a cross-encoder jointly scores each candidate against the query and keeps the top `retrieval_k`. Improves precision when term matching alone is insufficient.
 
 | Key | Description |
 | --- | --- |
@@ -212,7 +212,7 @@ At least one of `vector_enabled` or `bm25_enabled` must be `true`. The four comb
 | `reranker.model_name` | Cross-encoder model ID. Default: `"BAAI/bge-reranker-v2-m3"`. |
 | `reranker.top_k` | Number of chunks after reranking. Default: `null` (uses `retrieval_k`). |
 
-> **Performance**: Reranking adds ~100-300ms on GPU, ~500-1000ms on CPU. First load downloads the model (~1.1GB); subsequent loads use local cache.
+> **First load**: Downloads the model (~2.2GB) to the local HuggingFace cache on startup. **Per-query cost**: Cross-encoder scoring adds ~1-2s on CPU (~1.8s for 80 candidates); scales linearly with candidate count.
 
 ### Answer Generation (`llm`)
 
@@ -297,6 +297,14 @@ lib/
 3. Verify: `python -c "import torch; print(torch.cuda.is_available())"` -- should print `True`
 
 Without GPU, everything still works, but **much slower**.
+
+### Model Cache
+
+All local models are downloaded to `~/.cache/huggingface/hub/` on first run, then read from cache. To list cached models and their sizes:
+
+```bash
+du -sh ~/.cache/huggingface/hub/models--* | awk '{sub(/.*models--/, "", $2); sub(/--/, "/", $2); print $2": "$1}'
+```
 
 ---
 
