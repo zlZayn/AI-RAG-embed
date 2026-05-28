@@ -8,19 +8,35 @@ Drop your `.txt`/`.md`/`.typ` files into `documents/`, embed them locally to bui
 
 ## Quick Start
 
+### 1. Install dependencies
+
 ```bash
 pip install -r requirements.txt
+```
 
-# 1. Copy config_example.json to config.json and fill in your API key
+### 2. Configure
+
+Copy `config_example.json` to `config.json` and fill in your API key.
+
+```bash
+# bash
 cp config_example.json config.json
+```
 
-# 2. Put your .txt / .md / .typ files in documents/
+```powershell
+# pwsh
+Copy-Item config_example.json config.json
+```
 
-# 3. Build the vector index (downloads embedding model on first run)
-python rag_qa.py --build
+### 3. Add documents
 
-# 4. Ask a question
-python rag_qa.py        # interactive mode (multi-turn)
+Put your `.txt` / `.md` / `.typ` files in `documents/`. Embedding models are downloaded to local cache on first run.
+
+### 4. Build and ask
+
+```bash
+python rag_qa.py --build    # build index (incremental, skips if no changes)
+python rag_qa.py            # interactive mode (multi-turn)
 ```
 
 > **Note**: The code uses `hf-mirror.com` as the default HuggingFace endpoint. Do not override `HF_ENDPOINT` with `huggingface.co` -- it will cause connection timeouts.
@@ -303,7 +319,13 @@ Without GPU, everything still works, but **much slower**.
 All local models are downloaded to `~/.cache/huggingface/hub/` on first run, then read from cache. To list cached models and their sizes:
 
 ```bash
+# bash
 du -sh ~/.cache/huggingface/hub/models--* | awk '{sub(/.*models--/, "", $2); sub(/--/, "/", $2); print $2": "$1}'
+```
+
+```powershell
+# pwsh
+Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | ForEach-Object { $name = $_.Name -replace 'models--', '' -replace '--', '/'; $size = (Get-ChildItem $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum; "$name`: $([math]::Round($size/1MB)) MB" }
 ```
 
 ---

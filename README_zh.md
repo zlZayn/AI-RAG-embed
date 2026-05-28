@@ -8,19 +8,35 @@
 
 ## 快速开始
 
+### 1. 安装依赖
+
 ```bash
 pip install -r requirements.txt
+```
 
-# 1. 将 config_example.json 复制为 config.json 并填入 API Key
+### 2. 配置
+
+将 `config_example.json` 复制为 `config.json` 并填入 API Key。
+
+```bash
+# bash
 cp config_example.json config.json
+```
 
-# 2. 将 .txt / .md / .typ 文件放入 documents/ 目录
+```powershell
+# pwsh
+Copy-Item config_example.json config.json
+```
 
-# 3. 构建向量索引（首次运行会下载嵌入模型）
-python rag_qa.py --build
+### 3. 放入文档
 
-# 4. 提问
-python rag_qa.py        # 交互模式（一问一答循环）
+将 `.txt` / `.md` / `.typ` 文件放入 `documents/` 目录。首次运行会下载嵌入模型到本地缓存。
+
+### 4. 构建索引并提问
+
+```bash
+python rag_qa.py --build    # 构建索引（增量，无变更则跳过）
+python rag_qa.py            # 交互模式（一问一答循环）
 ```
 
 > **注意**：代码默认使用 `hf-mirror.com` 作为 HuggingFace 镜像端点。不要将 `HF_ENDPOINT` 覆盖为 `huggingface.co`——会导致连接超时。
@@ -303,7 +319,13 @@ lib/
 所有本地模型首次运行自动下载到 `~/.cache/huggingface/hub/`，之后直接读缓存。查看已缓存模型及大小：
 
 ```bash
+# bash
 du -sh ~/.cache/huggingface/hub/models--* | awk '{sub(/.*models--/, "", $2); sub(/--/, "/", $2); print $2": "$1}'
+```
+
+```powershell
+# pwsh
+Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | ForEach-Object { $name = $_.Name -replace 'models--', '' -replace '--', '/'; $size = (Get-ChildItem $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum; "$name`: $([math]::Round($size/1MB)) MB" }
 ```
 
 ---
