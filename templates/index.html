@@ -54,28 +54,20 @@
       top: var(--pad);
     }
 
-    /* Output — 默认绝对定位，跟随 container */
+    /* Output — 始终固定定位，通过 left/right 展开 */
     .output-wrap {
-      position: absolute;
-      width: var(--cw);
-      max-width: calc(100vw - var(--pad) * 2);
-      left: 0;
-      right: 0;
-      margin: 0 auto;
+      position: fixed;
       top: calc(12vh + 122px);
-      transition: all .4s ease;
+      left: calc(50vw - var(--cw) / 2);
+      right: calc(50vw - var(--cw) / 2);
+      transition: top .4s ease, left .4s ease, right .4s ease, bottom .4s ease;
     }
 
-    /* Output — 发送后固定定位，左右对称 */
     body.shut .output-wrap {
-      position: fixed;
       left: var(--pad);
       right: var(--pad);
       top: 120px;
       bottom: var(--pad);
-      width: auto;
-      margin: 0;
-      max-width: none;
     }
 
     /* Toggle */
@@ -181,6 +173,12 @@
       color: var(--surface);
     }
 
+    .output-clear.disabled {
+      opacity: .35;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
     pre {
       background: var(--surface);
       border: var(--border-decl);
@@ -265,6 +263,8 @@
       const btn = $('btn');
       const out = $('output');
       btn.disabled = true;
+      $('clearBtn').classList.add('disabled');
+      document.querySelectorAll('.toggle button').forEach(b => b.disabled = true);
       $('query').value = '';
       out.innerHTML = '<span class="hint">正在处理...</span>';
       document.body.classList.add('shut');
@@ -288,6 +288,8 @@
         out.textContent = 'Error: ' + e.message;
       }
       btn.disabled = false;
+      $('clearBtn').classList.remove('disabled');
+      document.querySelectorAll('.toggle button').forEach(b => b.disabled = false);
       $('query').focus();
     }
   </script>
