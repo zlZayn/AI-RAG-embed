@@ -67,6 +67,15 @@ class VectorDb:
         old = self._load_meta()
         return old.get("_model")
 
+    def store_meta_value(self, key: str, value: str) -> None:
+        meta = self._load_meta()
+        meta[key] = value
+        self._save_meta(meta)
+
+    def get_meta_value(self, key: str) -> str | None:
+        meta = self._load_meta()
+        return meta.get(key)
+
     # ------------------------------------------------------------------
     # BM25 file storage (BM25-only mode)
     # ------------------------------------------------------------------
@@ -282,7 +291,7 @@ class VectorDb:
                     )
             else:
                 print(
-                    f"[warn] no chunks passed threshold={distance_threshold}, returning closest"
+                    f"[warn] no vector chunks passed threshold={distance_threshold}, returning closest"
                 )
                 documents = [documents[0]]
 

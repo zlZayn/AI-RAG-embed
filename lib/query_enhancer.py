@@ -32,8 +32,12 @@ class QueryEnhancer:
             response = response.strip()
             if response:
                 return response
-            print("[warn] enhancement returned empty, using original question")
+            print(
+                f'[warn] enhancement returned empty for "{question[:60]}", using original question'
+            )
             return question
         except Exception as e:
-            print(f"[warn] enhancement failed: {e}, using original question")
+            print(
+                f'[warn] enhancement failed for "{question[:60]}": {e}, using original question'
+            )
             return question

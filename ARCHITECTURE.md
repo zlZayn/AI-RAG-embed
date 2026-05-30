@@ -20,8 +20,8 @@ Local RAG system with two phases:
 
 1. Load all `.txt`, `.md`, and `.typ` files from `documents/` directory, computing MD5 hashes for change detection
 2. Split files into text chunks at natural boundaries (paragraph > sentence > word)
-3. Check for file changes and embedding model changes against stored metadata; skip if none (only with `--build`)
-4. If the embedding model changed, automatically force a full rebuild (delete collection, re-embed all)
+3. Check for file, model, and chunking config changes against stored metadata; skip if none (only with `--build`)
+4. If the embedding model changed, warn and hint to run `--rebuild`
 5. Convert chunks to vector embeddings using a local embedding model
 6. Store embeddings and original text in a Chroma vector database
 7. If BM25 is enabled, build a keyword index from the same chunks
@@ -67,7 +67,7 @@ lib/
 ├── __init__.py
 ├── doc_loader.py       # os.walk + smart boundary chunking + ignore patterns + file hashing
 ├── embed_engine.py     # SentenceTransformer wrapper with language-based query prefix
-├── vector_db.py        # Chroma PersistentClient + BM25 hybrid retrieval + model change detection
+├── vector_db.py        # Chroma PersistentClient + BM25 hybrid retrieval + metadata management
 ├── bm25_retriever.py   # BM25 keyword retriever (jieba tokenization + rank-bm25)
 ├── llm_api.py          # openai.OpenAI wrapper
 ├── query_enhancer.py   # query enhancement (retrieval-optimized rewriting)
@@ -116,9 +116,9 @@ python rag_qa.py --rebuild             →  cmd_build(force=True)  (full rebuild
 
 Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--strict_context`, `--enhance`, `--debug`. These override the corresponding `retrieval.*` fields in `config.json`; if omitted, config values (or code defaults) are used. CLI override takes highest priority.
 
-Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing `chunking` requires a full `--rebuild`; changing `embedding_model_name` is auto-detected by `--build` and triggers a full rebuild automatically.
+Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing `chunking` requires a full `--rebuild`; changing `embedding_model_name` is auto-detected by `--build` and prints a warning to run `--rebuild`.
 
-Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded. `_init_retrieval()` imports `chromadb` and `openai` unconditionally, but imports `sentence-transformers` (and its `torch` dependency) only when `vector_enabled=true`. In BM25-only mode, the ~12s torch import is skipped entirely. `cmd_ask` and `cmd_chat` call `_init_retrieval()` through `_init_ask_chat()`. `cmd_search` and `cmd_build` call `_init_retrieval()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it forces a full rebuild before checking file hashes.
+Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded. `_init_retrieval()` imports `chromadb` and `openai` unconditionally, but imports `sentence-transformers` (and its `torch` dependency) only when `vector_enabled=true`. In BM25-only mode, the ~12s torch import is skipped entirely. `cmd_ask` and `cmd_chat` call `_init_retrieval()` through `_init_ask_chat()`. `cmd_search` and `cmd_build` call `_init_retrieval()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it prints a warning and hints to run `--rebuild`.
 
 Progress messages use the `_timed(label)` context manager for consistent `[step] {label}... done [Xs]` formatting.
 
@@ -151,12 +151,16 @@ cmd_build()
 ├─► model change detection (only if vector_enabled)
 │   ├─ store.get_meta_model()  →  old model from build_meta.json._model
 │   ├─ _resolve_model_name(config)  →  new model from config
-│   └─ if different → print "[info] model changed: ... -> ..., forcing full rebuild", force=True
+│   └─ if different → print "[warn] model changed: ... -> ...", hint to run --rebuild
+│
+├─► chunking config change detection
+│   ├─ store.get_meta_value("_chunking")  →  old chunking from build_meta.json._chunking
+│   └─ if different → print "[warn] chunking config changed: ...", hint to run --rebuild
 │
 ├─► store.has_changes(file_hashes)  (skipped if force=True)
 │   ├─ vector mode: compare build_meta.json keys + hash values
 │   ├─ BM25-only mode: compare bm25_store.json file_hashes
-│   └─ if no changes → print "[info] no changes detected, skipping", return early
+│   └─ if no changes → print "[step] no changes detected, skipping", return early
 │
 └─► store.rebuild / store.rebuild_full
     ├─ --build:   .rebuild(chunks, file_hashes)       # incremental
@@ -165,7 +169,7 @@ cmd_build()
 
 `--rebuild` skips change detection and forces a full delete-collection-then-add cycle. `--build` reads `build_meta.json` via stdlib `json` only — no `sentence-transformers`, `chromadb`, or `openai` imported when no files changed.
 
-Change detection compares both the embedding model name (stored as `_model` in `build_meta.json`) and file content hashes. When the model changes, `--build` automatically triggers a full rebuild — no manual `--rebuild` needed. The collection is deleted and recreated to handle dimension changes between models.
+Change detection compares the embedding model name (stored as `_model` in `build_meta.json`), chunking config (stored as `_chunking`), and file content hashes. When the model or chunking config changes, `--build` warns and hints to run `--rebuild`.
 
 `rebuild()` performs incremental updates by comparing file content hashes stored in `build_meta.json`. Only changed, added, or removed files are re-embedded. `rebuild_full()` deletes the entire Chroma collection and recreates it (to handle embedding dimension changes), then re-embeds all chunks.
 
@@ -272,7 +276,7 @@ build_qa_messages(template, q, ctx)  → [system, ...history?, user]
 
 Retrieved chunks are sanitized before wrapping to prevent Markdown rendering corruption:
 
-1. `strip("`")` -- removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
+1. ```strip("`")``` -- removes leading/trailing backtick debris from chunk boundaries (common when chunks are truncated mid-code-block).
 2. `replace("```", "``")` -- reduces any remaining triple-backtick to double-backtick (prevents premature fence closure).
 
 After sanitization, the context block is wrapped in a standard 3-backtick fence with `text` info string.
@@ -285,7 +289,7 @@ After each Q&A round, the output file is written in three stages:
 2. `_stream_answer()` streams the answer token-by-token to both console and file simultaneously
 3. `_write_round_context()` appends the retrieved chunks
 
-While waiting for the first token, `[generating]...` is displayed on the console and written to the output file as a placeholder. Once the first token arrives, the console placeholder is cleared via ANSI escape, and the file placeholder is removed by closing the file, stripping `[generating]...` via regex (`_remove_placeholder`), and reopening for append. Subsequent tokens are written in real-time. If interrupted (Ctrl+C), the file preserves the question and whatever portion of the answer was completed.
+While waiting for the first token, `[step] generating answer...` is displayed on the console and `[generating]...` is written to the output file as a placeholder. Once the first token arrives, the console placeholder is cleared via ANSI escape, and the file placeholder is removed by closing the file, stripping `[generating]...` via regex (`_remove_placeholder`), and reopening for append. Subsequent tokens are written in real-time. If interrupted (Ctrl+C), the file preserves the question and whatever portion of the answer was completed.
 
 ```text
 output/<sanitized_question>_<YYYYMMDD_HHMMSS>/
@@ -379,13 +383,15 @@ VectorDb(persist_dir, embed_engine=None, vector_enabled=True, bm25_enabled=False
   .query(question, k, distance_threshold=None) -> list[str]
   .has_changes(file_hashes) -> bool            # detect file changes (works for both storage modes)
   .get_meta_model() -> str | None              # read stored model name from build_meta.json
+  .store_meta_value(key, value) -> None        # store arbitrary metadata in build_meta.json
+  .get_meta_value(key) -> str | None           # read arbitrary metadata from build_meta.json
 ```
 
 - When `vector_enabled=true`: `chromadb.PersistentClient` with cosine distance (`hnsw:space: "cosine"`). Collection name: `"documents"`. Telemetry disabled. `embed_engine` must be provided.
 - When `vector_enabled=false` (BM25-only): `self._client = None`, no ChromaDB loaded. `embed_engine` can be `None`. BM25 data stored in `bm25_store.json` (JSON file with chunks and file hashes).
 - `rebuild()` prints an incremental summary: `[info] incremental: +N new, ~N updated, -N removed, total N chunks`.
 - `rebuild_full()` deletes and recreates the collection (not just clears entries) to handle embedding dimension changes when switching models.
-- `build_meta.json` stores `_model` alongside file hashes for model change detection (vector mode). `bm25_store.json` stores `file_hashes` for change detection (BM25-only mode).
+- `build_meta.json` stores `_model` and `_chunking` alongside file hashes for model and chunking config change detection (vector mode). `bm25_store.json` stores `file_hashes` for change detection (BM25-only mode).
 - Query routing: `vector + bm25` → `_hybrid_query()` (RRF fusion); `vector only` → `_vector_query()`; `bm25 only` → `_bm25_query()`.
 - When both enabled, `query()` delegates to `_hybrid_query()` which runs vector search and BM25 in parallel, then merges results via Reciprocal Rank Fusion (RRF): `score = Σ 1/(60 + rank)` per candidate across both ranked lists. The BM25 index is synced after every `rebuild()` and `rebuild_full()` call.
 
@@ -504,6 +510,8 @@ The model is cached to `~/.cache/huggingface/` after first download.
 | No `.txt`/`.md`/`.typ` files found | `[error]`, exit code 1 |
 | Config file not found | `[error]` + `[hint]`, exit code 1 |
 | No relevant chunks for a question | `[info]`, skip round |
+| `debug` flag enabled | `[debug]` retrieval details (query params, path, scores, previews) |
+| Build / query progress | `[step]` progress via `_timed()` context manager |
 | API network errors | `[retry]` 3x with backoff (1s, 2s, 4s); `[error]` after final failure |
 | Query enhancement failure | `[warn]`, fall back to original question |
 | Embedding model not cached | `[load]` download status, download from HuggingFace |
