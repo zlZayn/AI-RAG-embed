@@ -9,7 +9,9 @@ Usage:
   python servers/rag_server.py          # stdio mode (for agent connection)
 """
 
+import asyncio
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Add project root to sys.path so tools/ and rag_qa are importable
@@ -21,8 +23,18 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 from tools.rag_ask import rag_ask  # noqa: E402
 from tools.rag_get_info import rag_get_info  # noqa: E402
 from tools.rag_search import rag_search  # noqa: E402
+from tools.shared_store import warm_up  # noqa: E402
 
-mcp = FastMCP("rag-qa")
+
+@asynccontextmanager
+async def _lifespan(_app):
+    """Pre-load models and index in a background thread at server startup."""
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, warm_up)
+    yield {}
+
+
+mcp = FastMCP("rag-qa", lifespan=_lifespan)
 
 mcp.tool()(rag_search)
 mcp.tool()(rag_ask)

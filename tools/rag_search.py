@@ -10,33 +10,10 @@ if _PROJECT_ROOT not in sys.path:
 from rag_qa import (  # noqa: E402
     _get_retrieval_cfg,
     _init_enhancer,
-    _init_retrieval,
-    _init_reranker,
     load_config,
 )
 from tools import _mcp_safe  # noqa: E402
-
-# --- cached state ---
-_store = None
-_reranker = None
-
-
-def _get_store():
-    global _store
-    if _store is None:
-        config = load_config()
-        with _mcp_safe():
-            _store, _ = _init_retrieval(config)
-    return _store
-
-
-def _get_reranker():
-    global _reranker
-    if _reranker is None:
-        config = load_config()
-        with _mcp_safe():
-            _reranker = _init_reranker(config)
-    return _reranker
+from tools.shared_store import get_reranker, get_store  # noqa: E402
 
 
 def rag_search(
@@ -54,7 +31,7 @@ def rag_search(
         enhance: Enable query enhancement (rewrite/translate) for better retrieval.
         k: Number of chunks to retrieve. Omit to use config default.
     """
-    store = _get_store()
+    store = get_store()
     config = load_config()
     retrieval_cfg = _get_retrieval_cfg(config)
     retrieval_k = k or retrieval_cfg.get("k", 3)
@@ -70,7 +47,7 @@ def rag_search(
                 rewritten = enhancer.enhance(question)
 
     # Retrieve
-    reranker = _get_reranker()
+    reranker = get_reranker()
     k_for_search = retrieval_k * 4 if reranker else retrieval_k
 
     with _mcp_safe():

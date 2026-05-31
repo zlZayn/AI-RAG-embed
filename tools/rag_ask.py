@@ -9,30 +9,18 @@ if _PROJECT_ROOT not in sys.path:
 
 from rag_qa import (  # noqa: E402
     _get_retrieval_cfg,
-    _init_ask_chat,
     _init_enhancer,
     _retrieve_context,
     load_config,
 )
 from tools import _mcp_safe  # noqa: E402
-
-# --- cached state ---
-_store = None
-_llm = None
-_enhancer = None
-_system_prompt = None
-_reranker = None
-_initialized = False
-
-
-def _get_components():
-    global _store, _llm, _enhancer, _system_prompt, _reranker, _initialized
-    if not _initialized:
-        config = load_config()
-        with _mcp_safe():
-            _store, _llm, _enhancer, _system_prompt, _reranker = _init_ask_chat(config)
-        _initialized = True
-    return _store, _llm, _enhancer, _system_prompt, _reranker
+from tools.shared_store import (  # noqa: E402
+    get_enhancer,
+    get_llm,
+    get_reranker,
+    get_store,
+    get_system_prompt,
+)
 
 
 def rag_ask(
@@ -50,7 +38,11 @@ def rag_ask(
         enhance: Enable query enhancement (rewrite/translate) for better retrieval.
         k: Number of chunks to retrieve. Omit to use config default.
     """
-    store, llm, enhancer, system_prompt, reranker = _get_components()
+    store = get_store()
+    llm = get_llm()
+    enhancer = get_enhancer()
+    system_prompt = get_system_prompt()
+    reranker = get_reranker()
 
     config = load_config()
     retrieval_cfg = _get_retrieval_cfg(config)

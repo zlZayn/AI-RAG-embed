@@ -16,23 +16,10 @@ from rag_qa import (  # noqa: E402
     _build_retrieval_summary,
     _get_retrieval_cfg,
     _get_retrieval_mode,
-    _init_retrieval,
     _resolve_path,
     load_config,
 )
-from tools import _mcp_safe  # noqa: E402
-
-# --- cached state (same pattern as rag_search.py) ---
-_store = None
-
-
-def _get_store():
-    global _store
-    if _store is None:
-        config = load_config()
-        with _mcp_safe():
-            _store, _ = _init_retrieval(config)
-    return _store
+from tools.shared_store import get_store  # noqa: E402
 
 
 def _list_source_files(docs_dir: str) -> list[str]:
@@ -61,14 +48,24 @@ def _count_chunks_per_file(store) -> tuple[int, dict[str, int]]:
 
 
 def _load_indexed_hashes(chroma_dir: str) -> dict[str, str]:
-    """Read build_meta.json for indexed file hashes."""
+    """Read indexed file hashes from bm25_store.json or build_meta.json."""
+    # Try bm25_store.json first (authoritative in BM25-only mode)
+    bm25_path = os.path.join(chroma_dir, "bm25_store.json")
+    if os.path.exists(bm25_path):
+        with open(bm25_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        hashes = data.get("file_hashes", {})
+        if hashes:
+            return hashes
+
+    # Fallback: build_meta.json (vector/hybrid mode)
     meta_path = os.path.join(chroma_dir, "build_meta.json")
-    if not os.path.exists(meta_path):
-        return {}
-    with open(meta_path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    # filter out internal keys like _model, _chunking
-    return {k: v for k, v in raw.items() if not k.startswith("_")}
+    if os.path.exists(meta_path):
+        with open(meta_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return {k: v for k, v in raw.items() if not k.startswith("_")}
+
+    return {}
 
 
 def rag_get_info() -> dict:
@@ -82,7 +79,7 @@ def rag_get_info() -> dict:
     retrieval_cfg = _get_retrieval_cfg(config)
 
     # --- static config ---
-    store = _get_store()
+    store = get_store()
     mode = _get_retrieval_mode(store)
     reranker_on = config.get("reranker_enabled", False)
     retrieval_summary = _build_retrieval_summary(retrieval_cfg, reranker_on, mode)

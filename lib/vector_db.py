@@ -169,13 +169,13 @@ class VectorDb:
                     metadatas=[{"source": s} for s in sources],
                 )
 
-            self._save_meta(file_hashes)
-
             total = self._collection.count()
             print(
                 f"[info] incremental: +{len(added)} new, ~{len(changed)} updated, "
                 f"-{len(removed)} removed, total {total} chunks"
             )
+
+        self._save_meta(file_hashes)
 
         if self._bm25_enabled:
             if self._vector_enabled:
@@ -209,7 +209,7 @@ class VectorDb:
                 metadatas=[{"source": s} for s in sources],
             )
 
-            self._save_meta(file_hashes)
+        self._save_meta(file_hashes)
 
         if self._bm25_enabled:
             self._bm25_texts = [c["text"] for c in chunks]
