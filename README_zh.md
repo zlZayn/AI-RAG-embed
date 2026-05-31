@@ -66,6 +66,7 @@ python servers/rag_server.py          # stdio 传输（供 Agent 连接）
 | --- | --- | --- |
 | `rag_search` | 检索相关片段，不生成答案 | `question`（必填）、`enhance`、`k` |
 | `rag_ask` | 检索 + LLM 生成答案 | `question`（必填）、`enhance`、`k` |
+| `rag_get_info` | 获取 RAG 系统配置、已索引文档和路径 | （无） |
 
 `enhance` 启用查询增强（等同于 CLI 的 `--enhance`）。`k` 覆盖检索数量（默认取配置值）。在 Agent 的 MCP 配置中添加：
 
@@ -329,7 +330,8 @@ servers/
 tools/
 ├── __init__.py         # _mcp_safe() 上下文管理器
 ├── rag_search.py       # MCP 工具：仅检索片段
-└── rag_ask.py          # MCP 工具：检索 + LLM 生成答案
+├── rag_ask.py          # MCP 工具：检索 + LLM 生成答案
+└── rag_get_info.py     # MCP 工具：系统配置与已索引文档
 lib/
 ├── doc_loader.py       # 文件读取 + 文本分片 + 忽略规则
 ├── embed_engine.py     # 嵌入模型封装（sentence-transformers）

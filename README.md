@@ -60,12 +60,13 @@ Exposes the RAG system as MCP tools for agent integration (Claude Code, etc.).
 python servers/rag_server.py          # stdio transport (for agent connection)
 ```
 
-Two tools are registered:
+Three tools are registered:
 
 | Tool | Description | Parameters |
 | --- | --- | --- |
 | `rag_search` | Retrieve relevant chunks, no LLM generation | `question` (required), `enhance`, `k` |
 | `rag_ask` | Retrieve + generate answer via LLM | `question` (required), `enhance`, `k` |
+| `rag_get_info` | Get RAG system config, indexed documents, and paths | (none) |
 
 `enhance` enables query enhancement (same as `--enhance` CLI flag). `k` overrides the retrieval count (default from config). To connect, add the server to your agent's MCP config:
 
@@ -329,7 +330,8 @@ servers/
 tools/
 ├── __init__.py         # _mcp_safe() context manager
 ├── rag_search.py       # MCP tool: retrieve chunks without LLM
-└── rag_ask.py          # MCP tool: retrieve + LLM answer
+├── rag_ask.py          # MCP tool: retrieve + LLM answer
+└── rag_get_info.py     # MCP tool: system config and indexed documents
 lib/
 ├── doc_loader.py       # file I/O + text chunking + ignore patterns
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)

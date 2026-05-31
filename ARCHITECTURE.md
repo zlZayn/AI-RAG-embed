@@ -68,7 +68,8 @@ servers/
 tools/
 ├── __init__.py         # _mcp_safe() context manager (stdout→stderr for MCP stdio)
 ├── rag_search.py       # MCP tool: retrieve chunks without LLM
-└── rag_ask.py          # MCP tool: retrieve + LLM answer
+├── rag_ask.py          # MCP tool: retrieve + LLM answer
+└── rag_get_info.py     # MCP tool: system config and indexed documents
 lib/
 ├── __init__.py
 ├── doc_loader.py       # os.walk + smart boundary chunking + ignore patterns + file hashing
@@ -96,9 +97,11 @@ Agent (Claude Code, etc.)
 servers/rag_server.py          FastMCP("rag-qa")
 │  mcp.tool()(rag_search)
 │  mcp.tool()(rag_ask)
+│  mcp.tool()(rag_get_info)
 ▼
 tools/rag_search.py            rag_search(question, enhance, k) -> str
 tools/rag_ask.py               rag_ask(question, enhance, k) -> str
+tools/rag_get_info.py          rag_get_info() -> dict
 │  call rag_qa internals: _init_retrieval, _init_enhancer, _retrieve_context, etc.
 ▼
 lib/                           (shared with CLI path)
@@ -110,6 +113,7 @@ lib/                           (shared with CLI path)
 | --- | --- | --- |
 | `rag_search` | `question`, `enhance`, `k` | Retrieve chunks, format as `--- Chunk N ---` blocks, return string |
 | `rag_ask` | `question`, `enhance`, `k` | Retrieve + LLM generate, return answer string |
+| `rag_get_info` | (none) | Return system config, indexed documents, and paths as a dict |
 
 Parameter defaults: `enhance=false`, `k=config.retrieval.k` (fallback 3). No `debug` parameter — all internal debug output goes to stderr (invisible to MCP callers); removed to avoid confusion.
 
