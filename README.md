@@ -52,6 +52,36 @@ python rag_qa.py                      # interactive mode
 python rag_qa.py --help               # show all commands and options
 ```
 
+### MCP Server
+
+Exposes the RAG system as MCP tools for agent integration (Claude Code, etc.).
+
+```bash
+python servers/rag_server.py          # stdio transport (for agent connection)
+```
+
+Two tools are registered:
+
+| Tool | Description | Parameters |
+| --- | --- | --- |
+| `rag_search` | Retrieve relevant chunks, no LLM generation | `question` (required), `enhance`, `k` |
+| `rag_ask` | Retrieve + generate answer via LLM | `question` (required), `enhance`, `k` |
+
+`enhance` enables query enhancement (same as `--enhance` CLI flag). `k` overrides the retrieval count (default from config). To connect, add the server to your agent's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "rag-qa": {
+      "type": "stdio",
+      "command": "mcp",
+      "args": ["run", "D:\\path\\to\\AI-RAG-embed\\servers\\rag_server.py", "-t", "stdio"],
+      "env": {}
+    }
+  }
+}
+```
+
 ## Usage
 
 ### Build Index
@@ -294,6 +324,12 @@ config_example.json     # configuration template
 documents/              # put your .txt / .md / .typ files here
 chroma_db/              # persisted vector database (generated)
 output/                 # conversation exports (generated)
+servers/
+└── rag_server.py       # MCP server entry point (stdio transport)
+tools/
+├── __init__.py         # _mcp_safe() context manager
+├── rag_search.py       # MCP tool: retrieve chunks without LLM
+└── rag_ask.py          # MCP tool: retrieve + LLM answer
 lib/
 ├── doc_loader.py       # file I/O + text chunking + ignore patterns
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)

@@ -3,19 +3,18 @@
 import sys
 from pathlib import Path
 
-# Add project root to sys.path so we can import rag_qa
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from rag_qa import (
+from rag_qa import (  # noqa: E402
     _get_retrieval_cfg,
     _init_enhancer,
     _init_retrieval,
     _init_reranker,
     load_config,
 )
-from tools import _mcp_safe
+from tools import _mcp_safe  # noqa: E402
 
 # --- cached state ---
 _store = None
@@ -43,7 +42,6 @@ def _get_reranker():
 def rag_search(
     question: str,
     enhance: bool = False,
-    debug: bool = False,
     k: int | None = None,
 ) -> str:
     """Search documents and return relevant chunks.
@@ -54,7 +52,6 @@ def rag_search(
     Args:
         question: Search query.
         enhance: Enable query enhancement (rewrite/translate) for better retrieval.
-        debug: Include debug info in output.
         k: Number of chunks to retrieve. Omit to use config default.
     """
     store = _get_store()
@@ -71,8 +68,6 @@ def rag_search(
         if enhancer:
             with _mcp_safe():
                 rewritten = enhancer.enhance(question)
-            if debug:
-                print(f"[debug] enhanced: {rewritten}", file=sys.stderr)
 
     # Retrieve
     reranker = _get_reranker()
@@ -90,7 +85,7 @@ def rag_search(
     if reranker:
         with _mcp_safe():
             top_k = config.get("reranker", {}).get("top_k") or retrieval_k
-            chunks = reranker.rerank(rewritten, chunks, top_k=top_k, debug=debug)
+            chunks = reranker.rerank(rewritten, chunks, top_k=top_k)
 
     # Format output
     parts = []

@@ -52,6 +52,36 @@ python rag_qa.py                      # 交互模式
 python rag_qa.py --help               # 查看所有参数说明
 ```
 
+### MCP 服务器
+
+将 RAG 系统暴露为 MCP 工具，供 Agent 框架（Claude Code 等）集成使用。
+
+```bash
+python servers/rag_server.py          # stdio 传输（供 Agent 连接）
+```
+
+注册的工具：
+
+| 工具 | 说明 | 参数 |
+| --- | --- | --- |
+| `rag_search` | 检索相关片段，不生成答案 | `question`（必填）、`enhance`、`k` |
+| `rag_ask` | 检索 + LLM 生成答案 | `question`（必填）、`enhance`、`k` |
+
+`enhance` 启用查询增强（等同于 CLI 的 `--enhance`）。`k` 覆盖检索数量（默认取配置值）。在 Agent 的 MCP 配置中添加：
+
+```json
+{
+  "mcpServers": {
+    "rag-qa": {
+      "type": "stdio",
+      "command": "mcp",
+      "args": ["run", "D:\\path\\to\\AI-RAG-embed\\servers\\rag_server.py", "-t", "stdio"],
+      "env": {}
+    }
+  }
+}
+```
+
 ## 使用方法
 
 ### 构建索引
@@ -294,6 +324,12 @@ config_example.json     # 配置模板
 documents/              # 存放 .txt / .md / .typ 文件
 chroma_db/              # 持久化向量数据库（生成）
 output/                 # 对话导出（生成）
+servers/
+└── rag_server.py       # MCP 服务器入口（stdio 传输）
+tools/
+├── __init__.py         # _mcp_safe() 上下文管理器
+├── rag_search.py       # MCP 工具：仅检索片段
+└── rag_ask.py          # MCP 工具：检索 + LLM 生成答案
 lib/
 ├── doc_loader.py       # 文件读取 + 文本分片 + 忽略规则
 ├── embed_engine.py     # 嵌入模型封装（sentence-transformers）

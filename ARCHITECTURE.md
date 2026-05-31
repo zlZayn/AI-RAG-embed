@@ -63,6 +63,12 @@ config_example.json     # config template (committed)
 documents/              # raw .txt / .md / .typ files
 chroma_db/              # persisted Chroma DB (generated, gitignored)
 output/                 # conversation logs (generated, gitignored)
+servers/
+└── rag_server.py       # MCP server (FastMCP, stdio transport)
+tools/
+├── __init__.py         # _mcp_safe() context manager (stdout→stderr for MCP stdio)
+├── rag_search.py       # MCP tool: retrieve chunks without LLM
+└── rag_ask.py          # MCP tool: retrieve + LLM answer
 lib/
 ├── __init__.py
 ├── doc_loader.py       # os.walk + smart boundary chunking + ignore patterns + file hashing
@@ -74,6 +80,46 @@ lib/
 ├── local_translator.py # MarianMT local translation backend
 └── reranker.py         # cross-encoder reranker for precision re-ranking
 ```
+
+## MCP Server
+
+The RAG system is exposed as MCP tools via `servers/rag_server.py` using FastMCP with stdio transport. Agent frameworks (Claude Code, etc.) connect by launching the server as a subprocess and communicating over stdin/stdout JSON-RPC.
+
+### Server Architecture
+
+`rag_server.py` is a thin registration layer — it imports tool functions from `tools/` and registers them with `FastMCP`. All retrieval logic delegates to the existing `rag_qa.py` internals.
+
+```text
+Agent (Claude Code, etc.)
+│  stdin/stdout JSON-RPC (MCP protocol)
+▼
+servers/rag_server.py          FastMCP("rag-qa")
+│  mcp.tool()(rag_search)
+│  mcp.tool()(rag_ask)
+▼
+tools/rag_search.py            rag_search(question, enhance, k) -> str
+tools/rag_ask.py               rag_ask(question, enhance, k) -> str
+│  call rag_qa internals: _init_retrieval, _init_enhancer, _retrieve_context, etc.
+▼
+lib/                           (shared with CLI path)
+```
+
+### Tools
+
+| Tool | Parameters | Behavior |
+| --- | --- | --- |
+| `rag_search` | `question`, `enhance`, `k` | Retrieve chunks, format as `--- Chunk N ---` blocks, return string |
+| `rag_ask` | `question`, `enhance`, `k` | Retrieve + LLM generate, return answer string |
+
+Parameter defaults: `enhance=false`, `k=config.retrieval.k` (fallback 3). No `debug` parameter — all internal debug output goes to stderr (invisible to MCP callers); removed to avoid confusion.
+
+### _mcp_safe()
+
+`tools/__init__.py` provides `_mcp_safe()`, a context manager that redirects `sys.stdout` to `sys.stderr`. MCP stdio transport uses stdout for JSON-RPC — any stray `print()` would corrupt the protocol. All progress messages (`[step] retrieving...`, `[step] reranking...`) and internal prints are wrapped in this context manager.
+
+### Initialization & Caching
+
+Both tools cache their initialized components in module-level globals (`_store`, `_reranker`, etc.) to avoid re-loading models on every call. First invocation initializes from `config.json`; subsequent calls reuse the cached instances. This matches the CLI's "initialize once, query many" pattern but persists across MCP tool invocations within the same server process.
 
 ## Configuration
 

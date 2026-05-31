@@ -3,19 +3,18 @@
 import sys
 from pathlib import Path
 
-# Add project root to sys.path so we can import rag_qa
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from rag_qa import (
+from rag_qa import (  # noqa: E402
     _get_retrieval_cfg,
     _init_ask_chat,
     _init_enhancer,
     _retrieve_context,
     load_config,
 )
-from tools import _mcp_safe
+from tools import _mcp_safe  # noqa: E402
 
 # --- cached state ---
 _store = None
@@ -39,7 +38,6 @@ def _get_components():
 def rag_ask(
     question: str,
     enhance: bool = False,
-    debug: bool = False,
     k: int | None = None,
 ) -> str:
     """Ask a question and get an answer grounded in documents.
@@ -50,7 +48,6 @@ def rag_ask(
     Args:
         question: The question to ask.
         enhance: Enable query enhancement (rewrite/translate) for better retrieval.
-        debug: Include debug info in output.
         k: Number of chunks to retrieve. Omit to use config default.
     """
     store, llm, enhancer, system_prompt, reranker = _get_components()
@@ -77,7 +74,7 @@ def rag_ask(
             query_enhancer=query_enhancer,
             reranker=reranker,
             reranker_top_k=config.get("reranker", {}).get("top_k"),
-            debug=debug,
+            debug=False,
         )
 
     if not chunks:
