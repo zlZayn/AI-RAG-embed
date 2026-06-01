@@ -89,35 +89,14 @@ ENHANCER_PROMPT_WITH_HISTORY = (
 def build_system_prompt(config: dict) -> str:
     """Return system prompt template.
 
-    Uses SYSTEM_PROMPT_DEFAULT from this module.  If the config still
-    contains a legacy ``system_prompt`` key it is used with a deprecation
-    warning.  As a last resort the old ``strict_context`` / ``system_rules``
-    path is tried.
+    Uses SYSTEM_PROMPT_DEFAULT from this module.
+    If strict_context is true, uses the strict template instead.
     """
-    if "system_prompt" in config:
-        print(
-            "[warn] config 'system_prompt' is deprecated, "
-            "edit lib/prompt_templates.py instead"
-        )
-        return config["system_prompt"]
-
-    # Legacy fallback: strict_context = true uses the strict template
     if config.get("strict_context"):
-        base = _SYSTEM_PROMPT_STRICT
-        rules = config.get("system_rules", "")
-        if rules:
-            base += "\n\n" + rules
-            print("[warn] system_rules is deprecated, use system_prompt instead")
-        base += "\n\n---\n\nQuestion: {question}\n\nContext:\n{context}"
-        return base
-
-    # Legacy fallback: system_rules alone appends to the lax template
-    if config.get("system_rules"):
-        base = _SYSTEM_PROMPT_LAX
-        base += "\n\n" + config["system_rules"]
-        print("[warn] system_rules is deprecated, use system_prompt instead")
-        base += "\n\n---\n\nQuestion: {question}\n\nContext:\n{context}"
-        return base
+        return (
+            _SYSTEM_PROMPT_STRICT
+            + "\n\n---\n\nQuestion: {question}\n\nContext:\n{context}"
+        )
 
     return SYSTEM_PROMPT_DEFAULT
 

@@ -146,7 +146,6 @@ Both tools cache their initialized components in module-level globals (`_store`,
 | `max_history_rounds` | Behavior | Recent conversation rounds to keep (Default: `10`) |
 | `debug` | Behavior | Enable debug output for retrieval. Prints query params, query path (hybrid/vector/BM25), original vs rewritten question, per-chunk scores (distance, BM25, RRF, reranker), and source previews. Can be overridden by `--debug` CLI flag. (Default: `false`) |
 | `strict_context` | Behavior | `true` = answer only from context; `false` = supplement with own knowledge (Default: `false`) |
-| `system_rules` | Behavior | Additional system prompt rules. **Deprecated** — edit `lib/prompt_templates.py` instead. (Default: `""`) |
 
 Relative paths (`./`) are resolved against the project root.
 
@@ -306,11 +305,12 @@ All prompt templates and formatting logic are centralized in `lib/prompt_templat
 **Default** — `SYSTEM_PROMPT_DEFAULT` (the single source of truth):
 > A comprehensive template with relevance assessment, formatting rules (headings, no emoji, code blocks, lists, math), and [general knowledge] / [inferred] annotation guidelines. Contains `{question}` and `{context}` placeholders.
 
-**Backward-compatible resolution order:**
+**Resolution logic:**
 
-1. `config["system_prompt"]` — used with deprecation warning (config prompt text is no longer maintained)
-2. `strict_context` + `system_rules` — legacy fallback, also deprecated
-3. `SYSTEM_PROMPT_DEFAULT` from `lib/prompt_templates.py` — the default
+- If `strict_context=true` in config: Uses `_SYSTEM_PROMPT_STRICT` (answers only from context)
+- Otherwise: Uses `SYSTEM_PROMPT_DEFAULT`
+
+**To customize:** Edit `SYSTEM_PROMPT_DEFAULT` in `lib/prompt_templates.py`.
 
 The assembly flow in `rag_qa.py`:
 
