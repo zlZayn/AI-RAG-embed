@@ -138,6 +138,16 @@ class VectorDb:
     # Build / rebuild
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _chunk_metadata(chunk: dict) -> dict:
+        """Extract ChromaDB metadata from a chunk dict."""
+        m = {"source": chunk["source"]}
+        if "section" in chunk:
+            m["section"] = chunk["section"]
+        if "section_level" in chunk:
+            m["section_level"] = chunk["section_level"]
+        return m
+
     def rebuild(self, chunks: list[dict], file_hashes: dict[str, str]) -> None:
         if self._vector_enabled:
             old_meta = self._load_meta()
@@ -166,7 +176,7 @@ class VectorDb:
                     ids=ids,
                     embeddings=embeddings,
                     documents=texts,
-                    metadatas=[{"source": s} for s in sources],
+                    metadatas=[self._chunk_metadata(c) for c in new_chunks],
                 )
 
             total = self._collection.count()
@@ -206,7 +216,7 @@ class VectorDb:
                 ids=ids,
                 embeddings=embeddings,
                 documents=texts,
-                metadatas=[{"source": s} for s in sources],
+                metadatas=[self._chunk_metadata(c) for c in chunks],
             )
 
         self._save_meta(file_hashes)

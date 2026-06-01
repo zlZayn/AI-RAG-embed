@@ -9,7 +9,15 @@ Centralizes component initialization so that:
 import os
 import threading
 
-from rag_qa import _init_ask_chat, _resolve_path, load_config
+from lib.engine import (
+    init_enhancer,
+    init_llm,
+    init_reranker,
+    init_retrieval,
+    load_config,
+    resolve_path,
+)
+from lib.prompt_templates import build_system_prompt
 from tools import _mcp_safe
 
 # --- cached components ---
@@ -50,10 +58,15 @@ def _do_init() -> None:
     global _initialized, _meta_mtime, _meta_path
 
     config = load_config()
-    with _mcp_safe():
-        _store, _llm, _enhancer, _system_prompt, _reranker = _init_ask_chat(config)
 
-    chroma_dir = _resolve_path(config, "chroma_persist_dir")
+    with _mcp_safe():
+        _store, LlmApi = init_retrieval(config)
+        _llm = init_llm(config, LlmApi)
+        _enhancer = init_enhancer(config)
+        _reranker = init_reranker(config)
+        _system_prompt = build_system_prompt(config)
+
+    chroma_dir = resolve_path(config, "chroma_persist_dir")
     _meta_path = os.path.join(chroma_dir, "build_meta.json")
     _meta_mtime = _get_meta_mtime(_meta_path)
     _initialized = True

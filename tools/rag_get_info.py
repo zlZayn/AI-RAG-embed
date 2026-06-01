@@ -11,13 +11,13 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from lib.doc_loader import _collect_ignore_specs, _is_ignored  # noqa: E402
-from rag_qa import (  # noqa: E402
-    _build_indexing_summary,
-    _build_retrieval_summary,
-    _get_retrieval_cfg,
-    _get_retrieval_mode,
-    _resolve_path,
+from lib.engine import (  # noqa: E402
+    build_indexing_summary,
+    build_retrieval_summary,
+    get_retrieval_cfg,
+    get_retrieval_mode,
     load_config,
+    resolve_path,
 )
 from tools.shared_store import get_store  # noqa: E402
 
@@ -76,17 +76,17 @@ def rag_get_info() -> dict:
     Useful for understanding what the RAG system can search before querying it.
     """
     config = load_config()
-    retrieval_cfg = _get_retrieval_cfg(config)
+    retrieval_cfg = get_retrieval_cfg(config)
 
     # --- static config ---
     store = get_store()
-    mode = _get_retrieval_mode(store)
+    mode = get_retrieval_mode(store)
     reranker_on = config.get("reranker_enabled", False)
-    retrieval_summary = _build_retrieval_summary(retrieval_cfg, reranker_on, mode)
-    indexing_summary = _build_indexing_summary(config)
+    retrieval_summary = build_retrieval_summary(retrieval_cfg, reranker_on, mode)
+    indexing_summary = build_indexing_summary(config)
 
-    docs_dir = _resolve_path(config, "docs_dir")
-    chroma_dir = _resolve_path(config, "chroma_persist_dir")
+    docs_dir = resolve_path(config, "docs_dir")
+    chroma_dir = resolve_path(config, "chroma_persist_dir")
 
     # --- dynamic index state ---
     sources_on_disk = _list_source_files(docs_dir)

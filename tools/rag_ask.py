@@ -7,12 +7,12 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from rag_qa import (  # noqa: E402
-    _get_retrieval_cfg,
-    _init_enhancer,
-    _retrieve_context,
+from lib.engine import (  # noqa: E402
+    get_retrieval_cfg,
+    init_enhancer,
     load_config,
 )
+from rag_qa import _retrieve_context  # noqa: E402
 from tools import _mcp_safe  # noqa: E402
 from tools.shared_store import (  # noqa: E402
     get_enhancer,
@@ -45,13 +45,13 @@ def rag_ask(
     reranker = get_reranker()
 
     config = load_config()
-    retrieval_cfg = _get_retrieval_cfg(config)
+    retrieval_cfg = get_retrieval_cfg(config)
 
     # Override enhance if requested and not already configured
     query_enhancer = enhancer
     if enhance and not query_enhancer:
         with _mcp_safe():
-            query_enhancer = _init_enhancer(config)
+            query_enhancer = init_enhancer(config)
 
     retrieval_k = k or retrieval_cfg.get("k", 3)
 

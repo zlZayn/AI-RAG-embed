@@ -13,6 +13,8 @@ UNIT_HEADING = "heading"
 UNIT_PARAGRAPH = "paragraph"
 UNIT_CODE = "code"
 UNIT_TABLE = "table"
+UNIT_LIST = "list"
+UNIT_ENUM = "enum"
 
 # Markdown-specific patterns
 MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
@@ -326,14 +328,56 @@ def _extract_markdown_paragraph(lines: list[str], start: int) -> tuple[str, int]
         line = lines[end].strip()
         if not line:
             break
-        # Stop if we hit a heading, code fence, or table row
+        # Stop if we hit a heading, code fence, table row, or list item
         if (
             MARKDOWN_HEADING_RE.match(line)
             or line.startswith(CODE_FENCE)
             or MARKDOWN_TABLE_ROW_RE.match(line)
+            or re.match(r"^[-*]\s", line)
+            or re.match(r"^\d+\.\s", line)
         ):
             break
         end += 1
+    content = "\n".join(lines[start:end])
+    return content, end
+
+
+def _extract_markdown_list(lines: list[str], start: int) -> tuple[str, int]:
+    """Extract Markdown unordered list starting at lines[start]. Returns (content, end_index).
+
+    Collects consecutive '- ' or '* ' lines, including indented sub-items.
+    """
+    end = start
+    while end < len(lines):
+        line = lines[end]
+        stripped = line.strip()
+        if not stripped:
+            break
+        # List item: top-level "- "/"* " or indented sub-item
+        if re.match(r"^[-*]\s", stripped) or re.match(r"^\s+[-*]\s", line):
+            end += 1
+            continue
+        break
+    content = "\n".join(lines[start:end])
+    return content, end
+
+
+def _extract_markdown_enum(lines: list[str], start: int) -> tuple[str, int]:
+    """Extract Markdown ordered list starting at lines[start]. Returns (content, end_index).
+
+    Collects consecutive '1. ', '2. ', etc. lines, including indented sub-items.
+    """
+    end = start
+    while end < len(lines):
+        line = lines[end]
+        stripped = line.strip()
+        if not stripped:
+            break
+        # Enum item: top-level "N. " or indented sub-item
+        if re.match(r"^\d+\.\s", stripped) or re.match(r"^\s+\d+\.\s", line):
+            end += 1
+            continue
+        break
     content = "\n".join(lines[start:end])
     return content, end
 
@@ -370,7 +414,22 @@ def _parse_markdown(text: str) -> list[dict]:
             i = end
             continue
 
-        # 4. Paragraph
+        # 4. Unordered list: - item or * item
+        stripped = line.strip()
+        if re.match(r"^[-*]\s", stripped):
+            content, end = _extract_markdown_list(lines, i)
+            units.append({"type": UNIT_LIST, "content": content})
+            i = end
+            continue
+
+        # 5. Ordered list: 1. item
+        if re.match(r"^\d+\.\s", stripped):
+            content, end = _extract_markdown_enum(lines, i)
+            units.append({"type": UNIT_ENUM, "content": content})
+            i = end
+            continue
+
+        # 6. Paragraph
         if line.strip():
             content, end = _extract_markdown_paragraph(lines, i)
             units.append({"type": UNIT_PARAGRAPH, "content": content})
@@ -416,11 +475,18 @@ def _chunk_section(
     min_chars: int,
     include_heading: bool,
     source: str,
+    section_heading: str | None = None,
+    section_level: int = 0,
 ) -> list[dict]:
-    """Chunk a single section. Returns list of {"text", "source"}."""
+    """Chunk a single section. Returns list of {"text", "source", "section", "section_level"}."""
     units = section["units"]
     if not units:
         return []
+
+    meta = {
+        "section": section_heading or "",
+        "section_level": section_level,
+    }
 
     # Whole section fits in one chunk
     total = sum(len(u["content"]) for u in units)
@@ -429,7 +495,7 @@ def _chunk_section(
         if len(text) >= min_chars:
             if include_heading and section["heading"]:
                 text = f"> {section['heading']}\n\n{text}"
-            return [{"text": text, "source": source}]
+            return [{"text": text, "source": source, **meta}]
         return []
 
     # Need to split
@@ -472,7 +538,7 @@ def _chunk_section(
     for text in chunks:
         if include_heading and section["heading"]:
             text = f"> {section['heading']}\n\n{text}"
-        result.append({"text": text, "source": source})
+        result.append({"text": text, "source": source, **meta})
     return result
 
 
@@ -491,6 +557,8 @@ def _load_markdown(text: str, cfg: dict, source: str) -> list[dict]:
                 min_chars=auto["min_chars"],
                 include_heading=auto["include_heading"],
                 source=source,
+                section_heading=section["heading"],
+                section_level=section["level"],
             )
         )
     return chunks
@@ -543,10 +611,52 @@ def _extract_typst_paragraph(lines: list[str], start: int) -> tuple[str, int]:
             or line.startswith(CODE_FENCE)
             or re.match(r"\s*#(figure|table)\s*\(", line)
             or re.match(r"\s*#quote\s*\(", line)
+            or line.startswith("- ")
+            or line.startswith("+ ")
         ):
             break
         end += 1
     return "\n".join(lines[start:end]), end
+
+
+def _extract_typst_list(lines: list[str], start: int) -> tuple[str, int]:
+    """Extract Typst unordered list starting at lines[start]. Returns (content, end_index).
+
+    Collects consecutive '- ' lines, including indented sub-items.
+    """
+    end = start
+    while end < len(lines):
+        line = lines[end]
+        stripped = line.strip()
+        if not stripped:
+            break
+        # List item: top-level "- " or indented sub-item (spaces + "- ")
+        if stripped.startswith("- ") or re.match(r"^\s+-\s", line):
+            end += 1
+            continue
+        break
+    content = "\n".join(lines[start:end])
+    return content, end
+
+
+def _extract_typst_enum(lines: list[str], start: int) -> tuple[str, int]:
+    """Extract Typst ordered list starting at lines[start]. Returns (content, end_index).
+
+    Collects consecutive '+ ' lines, including indented sub-items.
+    """
+    end = start
+    while end < len(lines):
+        line = lines[end]
+        stripped = line.strip()
+        if not stripped:
+            break
+        # Enum item: top-level "+ " or indented sub-item (spaces + "+ ")
+        if stripped.startswith("+ ") or re.match(r"^\s+\+\s", line):
+            end += 1
+            continue
+        break
+    content = "\n".join(lines[start:end])
+    return content, end
 
 
 def _parse_typst(text: str) -> list[dict]:
@@ -605,8 +715,22 @@ def _parse_typst(text: str) -> list[dict]:
             i = end
             continue
 
-        # Skip non-content: comments, style rules, code
+        # List: - item
         stripped = line.strip()
+        if stripped.startswith("- "):
+            content, end = _extract_typst_list(lines, i)
+            units.append({"type": UNIT_LIST, "content": content})
+            i = end
+            continue
+
+        # Enum: + item
+        if stripped.startswith("+ "):
+            content, end = _extract_typst_enum(lines, i)
+            units.append({"type": UNIT_ENUM, "content": content})
+            i = end
+            continue
+
+        # Skip non-content: comments, style rules, code
         if (
             stripped.startswith("//")
             or re.match(r"^#(set|show|let|hr|pagebreak|v|h|import|include)\b", stripped)
@@ -642,6 +766,8 @@ def _load_typst(text: str, cfg: dict, source: str) -> list[dict]:
                 min_chars=auto["min_chars"],
                 include_heading=auto["include_heading"],
                 source=source,
+                section_heading=section["heading"],
+                section_level=section["level"],
             )
         )
     return chunks
@@ -708,6 +834,15 @@ def load_documents(docs_dir: str, config: dict) -> tuple[list[dict], dict]:
                     )
                 ]
 
+            # Ensure all chunks have metadata fields (fixed/plain text modes
+            # don't go through _chunk_section, so add defaults)
+            for c in file_chunks:
+                c.setdefault("section", "")
+                c.setdefault("section_level", 0)
+
             chunks.extend(file_chunks)
+
+    for idx, chunk in enumerate(chunks):
+        chunk["chunk_index"] = idx
 
     return chunks, file_hashes
