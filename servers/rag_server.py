@@ -36,9 +36,16 @@ async def _lifespan(_app):
 
 mcp = FastMCP("rag-qa", lifespan=_lifespan)
 
-mcp.tool()(rag_search)
-mcp.tool()(rag_ask)
-mcp.tool()(rag_get_info)
+_READONLY = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
+
+mcp.tool(annotations=_READONLY)(rag_search)
+mcp.tool(annotations=_READONLY)(rag_ask)
+mcp.tool(annotations=_READONLY)(rag_get_info)
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
