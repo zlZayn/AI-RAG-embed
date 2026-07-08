@@ -1,0 +1,16 @@
+[project]
+name = "ai-rag-embed"
+version = "0.1.0"
+description = "AI-powered RAG embedding and retrieval system"
+requires-python = ">=3.11"
+dependencies = [
+    "chromadb>=0.4.0",
+    "flask>=2.0.0",
+    "jieba",
+    "mcp[cli]",
+    "openai>=1.0.0",
+    "pathspec",
+    "rank-bm25",
+    "sentence-transformers",
+    "transformers",
+]
