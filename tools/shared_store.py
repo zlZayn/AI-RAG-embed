@@ -12,13 +12,13 @@ import threading
 from lib.engine import (
     init_enhancer,
     init_llm,
+    init_llm_class,
     init_reranker,
-    init_retrieval,
+    init_store,
     load_config,
     resolve_path,
 )
 from lib.prompt_templates import build_system_prompt
-from tools import _mcp_safe
 
 # --- cached components ---
 _store = None
@@ -59,12 +59,11 @@ def _do_init() -> None:
 
     config = load_config()
 
-    with _mcp_safe():
-        _store, LlmApi = init_retrieval(config)
-        _llm = init_llm(config, LlmApi)
-        _enhancer = init_enhancer(config)
-        _reranker = init_reranker(config)
-        _system_prompt = build_system_prompt(config)
+    _store = init_store(config)
+    _llm = init_llm(config, init_llm_class())
+    _enhancer = init_enhancer(config)
+    _reranker = init_reranker(config)
+    _system_prompt = build_system_prompt(config)
 
     chroma_dir = resolve_path(config, "chroma_persist_dir")
     _meta_path = os.path.join(chroma_dir, "build_meta.json")

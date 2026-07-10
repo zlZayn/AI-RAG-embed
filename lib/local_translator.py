@@ -4,6 +4,8 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from transformers import MarianMTModel, MarianTokenizer
 
+from lib.log import log_load
+
 
 class LocalTranslator:
     _cache: dict[str, tuple[MarianTokenizer, MarianMTModel]] = {}
@@ -23,7 +25,7 @@ class LocalTranslator:
                 )
                 model = MarianMTModel.from_pretrained(model_name, local_files_only=True)
             except Exception:
-                print(f"[load] downloading translation model: {model_name}")
+                log_load(f"downloading translation model: {model_name}")
                 tokenizer = MarianTokenizer.from_pretrained(model_name)
                 model = MarianMTModel.from_pretrained(model_name)
             cls._cache[model_name] = (tokenizer, model)

@@ -10,6 +10,8 @@ import sys
 import time
 from contextlib import contextmanager
 
+from lib.log import log_error, log_warn
+
 _PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
 
 
@@ -22,9 +24,9 @@ def load_config() -> dict:
     """Read config.json from the project root."""
     config_path = os.path.join(_PROJECT_DIR, "config.json")
     if not os.path.exists(config_path):
-        print(f"[error] config file not found: {config_path}")
-        print(
-            "[hint] copy config_example.json to config.json and fill in your settings"
+        log_error(f"config file not found: {config_path}")
+        log_error(
+            "hint: copy config_example.json to config.json and fill in your settings"
         )
         sys.exit(1)
     with open(config_path, "r", encoding="utf-8") as f:
@@ -57,9 +59,8 @@ def resolve_model_name(config: dict) -> str:
 def timed(label: str):
     """Print '[step] label... done [Xs]' around a block."""
     t0 = time.perf_counter()
-    print(f"[step] {label}... ", end="", flush=True)
     yield
-    print(f"\r\033[K[step] {label}... done [{time.perf_counter() - t0:.1f}s]")
+    print(f"[step] {label}... done [{(time.perf_counter() - t0):.1f}s]", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +72,8 @@ def get_retrieval_cfg(config: dict) -> dict:
     """Get retrieval config block, with legacy fallback for old config format."""
     if "retrieval" in config:
         return config["retrieval"]
-    print(
-        "[warn] top-level retrieval_k/retrieval_distance_threshold/enhancer "
+    log_warn(
+        "top-level retrieval_k/retrieval_distance_threshold/enhancer "
         "is deprecated, use retrieval.* instead"
     )
     return {
@@ -132,20 +133,26 @@ def build_retrieval_summary(
 # ---------------------------------------------------------------------------
 
 
-def init_retrieval(config: dict, debug: bool = False):
-    """Initialize VectorDb and EmbedEngine. Returns (store, LlmApi class).
+def init_llm_class():
+    """Lazy import: returns LlmApi class without initializing anything.
 
-    LlmApi is returned as a class (not instance) — the caller decides
-    whether and how to instantiate it.
+    Separated from init_store so that retrieval-only code paths
+    (cmd_search, --build) never pull in openai.
     """
     from lib.llm_api import LlmApi
+
+    return LlmApi
+
+
+def init_store(config: dict, debug: bool = False):
+    """Initialize VectorDb (and optionally EmbedEngine). Returns VectorDb instance."""
     from lib.vector_db import VectorDb
 
     vector_enabled = config.get("vector_enabled", True)
     bm25_enabled = config.get("bm25_enabled", False)
 
     if not vector_enabled and not bm25_enabled:
-        print("[error] At least one of vector_enabled or bm25_enabled must be true.")
+        log_error("At least one of vector_enabled or bm25_enabled must be true.")
         raise SystemExit(1)
 
     EmbedEngine = None
@@ -169,7 +176,7 @@ def init_retrieval(config: dict, debug: bool = False):
             model_name=model_name,
             debug=debug,
         )
-    return store, LlmApi
+    return store
 
 
 def init_llm(config, LlmApi):

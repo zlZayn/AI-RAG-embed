@@ -5,6 +5,7 @@ import chromadb
 from chromadb.config import Settings
 
 from lib.bm25_retriever import BM25Retriever
+from lib.log import log_debug, log_info, log_warn
 
 _META_FILE = "build_meta.json"
 
@@ -60,8 +61,11 @@ class VectorDb:
 
     def _save_meta(self, meta: dict[str, str]) -> None:
         meta["_model"] = self._model_name
-        with open(self._meta_path(), "w", encoding="utf-8") as f:
+        path = self._meta_path()
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
+        os.replace(tmp, path)
 
     def get_meta_model(self) -> str | None:
         old = self._load_meta()
@@ -92,14 +96,16 @@ class VectorDb:
         self._bm25_texts = [c["text"] for c in data["chunks"]]
         self._bm25_sources = [c["source"] for c in data["chunks"]]
         self._bm25.build(self._bm25_texts)
-        print(f"[info] BM25 index loaded from file: {len(self._bm25_texts)} chunks")
 
     def _save_bm25_to_file(
         self, chunks: list[dict], file_hashes: dict[str, str]
     ) -> None:
         data = {"chunks": chunks, "file_hashes": file_hashes}
-        with open(self._bm25_store_path(), "w", encoding="utf-8") as f:
+        path = self._bm25_store_path()
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
 
     # ------------------------------------------------------------------
     # BM25 from ChromaDB (hybrid mode)
@@ -112,7 +118,6 @@ class VectorDb:
             self._bm25_texts = all_data["documents"]
             self._bm25_sources = [m["source"] for m in all_data["metadatas"]]
             self._bm25.build(self._bm25_texts)
-            print(f"[info] BM25 index loaded: {len(self._bm25_texts)} chunks")
 
     # ------------------------------------------------------------------
     # Change detection
@@ -180,12 +185,10 @@ class VectorDb:
                 )
 
             total = self._collection.count()
-            print(
-                f"[info] incremental: +{len(added)} new, ~{len(changed)} updated, "
+            log_info(
+                f"incremental: +{len(added)} new, ~{len(changed)} updated, "
                 f"-{len(removed)} removed, total {total} chunks"
             )
-
-        self._save_meta(file_hashes)
 
         if self._bm25_enabled:
             if self._vector_enabled:
@@ -195,7 +198,9 @@ class VectorDb:
                 self._bm25_texts = [c["text"] for c in chunks]
                 self._bm25_sources = [c["source"] for c in chunks]
                 self._bm25.build(self._bm25_texts)
-                print(f"[info] BM25 index built: {len(self._bm25_texts)} chunks")
+                log_info(f"BM25 index built: {len(self._bm25_texts)} chunks")
+
+        self._save_meta(file_hashes)
 
     def rebuild_full(self, chunks: list[dict], file_hashes: dict[str, str]) -> None:
         if self._vector_enabled:
@@ -219,15 +224,15 @@ class VectorDb:
                 metadatas=[self._chunk_metadata(c) for c in chunks],
             )
 
-        self._save_meta(file_hashes)
-
         if self._bm25_enabled:
             self._bm25_texts = [c["text"] for c in chunks]
             self._bm25_sources = [c["source"] for c in chunks]
             self._bm25.build(self._bm25_texts)
             if not self._vector_enabled:
                 self._save_bm25_to_file(chunks, file_hashes)
-            print(f"[info] BM25 index rebuilt: {len(self._bm25_texts)} chunks")
+            log_info(f"BM25 index rebuilt: {len(self._bm25_texts)} chunks")
+
+        self._save_meta(file_hashes)
 
     # ------------------------------------------------------------------
     # Query
@@ -238,27 +243,27 @@ class VectorDb:
     ) -> list[str]:
         """Retrieve top-k document chunks."""
         if self._debug:
-            print(f"\n[debug] query params: k={k}, threshold={distance_threshold}")
+            log_debug(f"query params: k={k}, threshold={distance_threshold}")
 
         if self._vector_enabled and self._bm25_enabled and self._bm25.ready:
             if self._debug:
-                print("[debug] query path: hybrid (vector + BM25, RRF fusion)")
+                log_debug("query path: hybrid (vector + BM25, RRF fusion)")
             return self._hybrid_query(
                 question, k=k, distance_threshold=distance_threshold
             )
         elif self._vector_enabled:
             if self._debug:
-                print("[debug] query path: vector-only")
+                log_debug("query path: vector-only")
             return self._vector_query(
                 question, k=k, distance_threshold=distance_threshold
             )
         elif self._bm25_enabled and self._bm25.ready:
             if self._debug:
-                print("[debug] query path: BM25-only")
+                log_debug("query path: BM25-only")
             return self._bm25_query(question, k=k)
         else:
             if self._debug:
-                print("[debug] query path: none (vector and BM25 both disabled)")
+                log_debug("query path: none (vector and BM25 both disabled)")
             return []
 
     def _vector_query(
@@ -280,11 +285,11 @@ class VectorDb:
             return []
 
         if self._debug:
-            print("\n[debug] retrieval details")
+            log_debug("retrieval details")
             for i, (doc, dist) in enumerate(zip(documents, distances)):
                 similarity = 1 - dist
-                print(
-                    f"[debug]   chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}"
+                log_debug(
+                    f"  chunk {i + 1}: distance={dist:.4f}, similarity={similarity:.4f}"
                 )
 
         if distance_threshold is not None:
@@ -296,12 +301,12 @@ class VectorDb:
             if filtered:
                 documents = [item[0] for item in filtered]
                 if self._debug:
-                    print(
-                        f"[debug] filtered to {len(documents)} chunks (threshold={distance_threshold})"
+                    log_debug(
+                        f"filtered to {len(documents)} chunks (threshold={distance_threshold})"
                     )
             else:
-                print(
-                    f"[warn] no vector chunks passed threshold={distance_threshold}, returning closest"
+                log_warn(
+                    f"no vector chunks passed threshold={distance_threshold}, returning closest"
                 )
                 documents = [documents[0]]
 
@@ -313,13 +318,13 @@ class VectorDb:
         documents = [self._bm25_texts[i] for i, _ in hits]
 
         if self._debug:
-            print("\n[debug] BM25 retrieval details")
+            log_debug("BM25 retrieval details")
             for i, (idx, score) in enumerate(hits):
                 src = self._bm25_sources[idx] if idx < len(self._bm25_sources) else ""
-                print(
-                    f"[debug]   chunk {i + 1}: bm25_score={score:.4f} [source: {src}]"
+                log_debug(
+                    f"  chunk {i + 1}: bm25_score={score:.4f} [source: {src}]"
                 )
-                print(f"[debug]     preview: {self._bm25_texts[idx][:80]}...")
+                log_debug(f"    preview: {self._bm25_texts[idx][:80]}...")
 
         return documents
 
@@ -364,13 +369,13 @@ class VectorDb:
         documents = [doc for doc, _ in ranked[:k]]
 
         if self._debug:
-            print("\n[debug] hybrid retrieval details")
+            log_debug("hybrid retrieval details")
             for i, (doc, score) in enumerate(ranked[:k]):
                 src = ""
                 if doc in self._bm25_texts:
                     idx = self._bm25_texts.index(doc)
                     src = f" [source: {self._bm25_sources[idx]}]"
-                print(f"[debug]   chunk {i + 1}: rrf_score={score:.6f}{src}")
-                print(f"[debug]     preview: {doc[:80]}...")
+                log_debug(f"  chunk {i + 1}: rrf_score={score:.6f}{src}")
+                log_debug(f"    preview: {doc[:80]}...")
 
         return documents

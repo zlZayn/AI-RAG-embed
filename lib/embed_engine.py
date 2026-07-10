@@ -4,6 +4,8 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from sentence_transformers import SentenceTransformer
 
+from lib.log import log_load
+
 _QUERY_PREFIXES = {
     "zh": "为这个句子生成表示以用于检索中文文档: ",
     "en": "Represent this sentence for searching relevant passages: ",
@@ -15,7 +17,7 @@ class EmbedEngine:
         try:
             self._model = SentenceTransformer(model_name, local_files_only=True)
         except Exception:
-            print(f"[load] downloading embedding model: {model_name}")
+            log_load(f"downloading embedding model: {model_name}")
             self._model = SentenceTransformer(model_name)
         self._query_prefix = _QUERY_PREFIXES.get(lang, _QUERY_PREFIXES["en"])
 

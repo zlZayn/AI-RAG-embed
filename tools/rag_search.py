@@ -12,7 +12,6 @@ from lib.engine import (  # noqa: E402
     init_enhancer,
     load_config,
 )
-from tools import _mcp_safe  # noqa: E402
 from tools.shared_store import get_reranker, get_store  # noqa: E402
 
 
@@ -40,29 +39,25 @@ def rag_search(
     # Optional query enhancement
     rewritten = question
     if enhance:
-        with _mcp_safe():
-            enhancer = init_enhancer(config)
+        enhancer = init_enhancer(config)
         if enhancer:
-            with _mcp_safe():
-                rewritten = enhancer.enhance(question)
+            rewritten = enhancer.enhance(question)
 
     # Retrieve
     reranker = get_reranker()
     k_for_search = retrieval_k * 4 if reranker else retrieval_k
 
-    with _mcp_safe():
-        chunks = store.query(
-            rewritten, k=k_for_search, distance_threshold=distance_threshold
-        )
+    chunks = store.query(
+        rewritten, k=k_for_search, distance_threshold=distance_threshold
+    )
 
     if not chunks:
         return "No relevant documents found."
 
     # Rerank if available
     if reranker:
-        with _mcp_safe():
-            top_k = config.get("reranker", {}).get("top_k") or retrieval_k
-            chunks = reranker.rerank(rewritten, chunks, top_k=top_k)
+        top_k = config.get("reranker", {}).get("top_k") or retrieval_k
+        chunks = reranker.rerank(rewritten, chunks, top_k=top_k)
 
     # Format output
     parts = []

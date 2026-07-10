@@ -50,7 +50,7 @@ Lazy import rules:
 - `sentence-transformers` (and its `torch` dependency) is imported only when `vector_enabled=true`. In BM25-only mode, the ~12s torch import is skipped entirely.
 - `transformers` + `sentencepiece` for MarianMT is imported only when `query_enhance_enabled=true` and `enhancer.mode=local`.
 - `CrossEncoder` for reranking is imported only when `reranker_enabled=true`.
-- `openai` for LLM API is imported by `_init_retrieval()` unconditionally, but the LLM client itself is only instantiated in `cmd_ask` and `cmd_chat` (not in `cmd_search` or `cmd_build`).
+- `openai` for LLM API is imported by `init_llm_class()` only when retrieving the class reference; `init_store()` never imports `openai`, keeping retrieval-only paths (cmd_search, --build) free of the LLM dependency.
 
 When enhancer is in local mode, it loads a MarianMT model; in LLM mode it calls the remote API (shared with the LLM slot). Maximum local models loaded simultaneously: 3 (embedding + local enhancer + reranker). Minimum: 0 (BM25-only search).
 
@@ -66,12 +66,13 @@ output/                 # conversation logs (generated, gitignored)
 servers/
 └── rag_server.py       # MCP server (FastMCP, stdio transport)
 tools/
-├── __init__.py         # _mcp_safe() context manager (stdout→stderr for MCP stdio)
+├── __init__.py         # package marker (all logging via lib/log.py to stderr)
 ├── rag_search.py       # MCP tool: retrieve chunks without LLM
 ├── rag_ask.py          # MCP tool: retrieve + LLM answer
 └── rag_get_info.py     # MCP tool: system config and indexed documents
 lib/
 ├── __init__.py
+├── log.py              # unified logging: all progress/debug/error to stderr
 ├── doc_loader.py       # os.walk + smart boundary chunking + ignore patterns + file hashing
 ├── embed_engine.py     # SentenceTransformer wrapper with language-based query prefix
 ├── vector_db.py        # Chroma PersistentClient + BM25 hybrid retrieval + metadata management
@@ -102,7 +103,7 @@ servers/rag_server.py          FastMCP("rag-qa")
 tools/rag_search.py            rag_search(question, enhance, k) -> str
 tools/rag_ask.py               rag_ask(question, enhance, k) -> str
 tools/rag_get_info.py          rag_get_info() -> dict
-│  call rag_qa internals: _init_retrieval, _init_enhancer, _retrieve_context, etc.
+│  call rag_qa internals: init_store, init_enhancer, _retrieve_context, etc.
 ▼
 lib/                           (shared with CLI path)
 ```
@@ -115,11 +116,11 @@ lib/                           (shared with CLI path)
 | `rag_ask` | `question`, `enhance`, `k` | Retrieve + LLM generate, return answer string |
 | `rag_get_info` | (none) | Return system config, indexed documents, and paths as a dict |
 
-Parameter defaults: `enhance=false`, `k=config.retrieval.k` (fallback 3). No `debug` parameter — all internal debug output goes to stderr (invisible to MCP callers); removed to avoid confusion.
+Parameter defaults: `enhance=false`, `k=config.retrieval.k` (fallback 3). No `debug` parameter — all internal debug output goes to stderr via `lib/log.py` (invisible to MCP callers); removed to avoid confusion.
 
-### _mcp_safe()
+### Logging
 
-`tools/__init__.py` provides `_mcp_safe()`, a context manager that redirects `sys.stdout` to `sys.stderr`. MCP stdio transport uses stdout for JSON-RPC — any stray `print()` would corrupt the protocol. All progress messages (`[step] retrieving...`, `[step] reranking...`) and internal prints are wrapped in this context manager.
+All progress, debug, info, warning, and error output uses `lib/log.py`, which writes to `sys.stderr`. This keeps stdout clean for CLI command output (answers, retrieved chunks) and MCP JSON-RPC protocol. See `lib/log.py` for available functions (`log_step`, `log_info`, `log_warn`, `log_error`, `log_debug`, `log_load`, `log_retry`).
 
 ### Initialization & Caching
 
@@ -167,9 +168,9 @@ Optional CLI overrides: `--retrieval_k`, `--retrieval_distance_threshold`, `--st
 
 Only query-time parameters are exposed as CLI overrides. Indexing parameters (`chunking`, `embedding_model_name`) are intentionally excluded: changing `chunking` requires a full `--rebuild`; changing `embedding_model_name` is auto-detected by `--build` and prints a warning to run `--rebuild`.
 
-Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded. `_init_retrieval()` imports `chromadb` and `openai` unconditionally, but imports `sentence-transformers` (and its `torch` dependency) only when `vector_enabled=true`. In BM25-only mode, the ~12s torch import is skipped entirely. `cmd_ask` and `cmd_chat` call `_init_retrieval()` through `_init_ask_chat()`. `cmd_search` and `cmd_build` call `_init_retrieval()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it prints a warning and hints to run `--rebuild`.
+Heavy imports (`sentence-transformers`, `chromadb`, `openai`) are lazy-loaded. `init_store()` imports `chromadb` and `sentence-transformers` conditionally; `init_llm_class()` imports `openai`. In BM25-only mode, the ~12s torch import is skipped entirely. `cmd_ask` and `cmd_chat` call `init_store()` through `_init_ask_chat()`. `cmd_search` and `cmd_build` call `init_store()` directly (skipping LLM init). `cmd_search` with `--enhance` additionally calls `_init_enhancer()` to initialize the query enhancer. `cmd_build` initializes the embed store early to check for model changes via `store.get_meta_model()`; if the model changed, it prints a warning and hints to run `--rebuild`.
 
-Progress messages use the `_timed(label)` context manager for consistent `[step] {label}... done [Xs]` formatting.
+Progress messages use `log_step(label)` from `lib/log.py` for consistent `[step] {label}... done [Xs]` formatting.
 
 ### _init_enhancer(config)
 
@@ -188,7 +189,7 @@ cmd_build()
 │       chunks: [{"text": str, "source": "relative/path"}, ...]
 │       file_hashes: {"relative/path": "md5hex", ...}
 │
-├─► _init_retrieval(config)
+├─► init_store(config)
 │   ├─ if vector_enabled:
 │   │   ├─ _resolve_model_name(config)  →  model name (resolves nested per-lang config)
 │   │   ├─ embed_engine.EmbedEngine(model_name, lang=docs_lang)
@@ -228,13 +229,13 @@ When `bm25_enabled` is true, both `rebuild()` and `rebuild_full()` sync the BM25
 
 Both `cmd_ask` and `cmd_chat` share `_init_ask_chat()` for engine initialization and `_retrieve_context()` for retrieval.
 `cmd_chat` additionally maintains a `history` list across rounds, truncated to the last `max_history_rounds` rounds (default: 10), and passes it for context-aware enhancement and message construction.
-`cmd_search` uses only `_init_retrieval()` for retrieval without LLM generation. With `--enhance`, it additionally calls `_init_enhancer()` to initialize the query enhancer and rewrites the question before retrieval — same enhancement logic as `cmd_ask`, but without LLM answer generation.
+`cmd_search` uses only `init_store()` for retrieval without LLM generation. With `--enhance`, it additionally calls `_init_enhancer()` to initialize the query enhancer and rewrites the question before retrieval — same enhancement logic as `cmd_ask`, but without LLM answer generation.
 
 `cmd_search` with `--enhance` follows a simplified path compared to `_retrieve_context`:
 
 ```text
 cmd_search(question, use_enhancer=True)
-├─► _init_retrieval(config)          →  store
+├─► init_store(config)                →  store
 ├─► _get_retrieval_cfg(config)         →  retrieval_cfg
 ├─► _init_enhancer(config)             →  enhancer
 ├─► enhancer.enhance(question)         →  rewritten_question
@@ -339,7 +340,7 @@ After each Q&A round, the output file is written in three stages:
 2. `_stream_answer()` streams the answer token-by-token to both console and file simultaneously
 3. `_write_round_context()` appends the retrieved chunks
 
-While waiting for the first token, `[step] generating answer...` is displayed on the console and `[generating]...` is written to the output file as a placeholder. Once the first token arrives, the console placeholder is cleared via ANSI escape, and the file placeholder is removed by closing the file, stripping `[generating]...` via regex (`_remove_placeholder`), and reopening for append. Subsequent tokens are written in real-time. If interrupted (Ctrl+C), the file preserves the question and whatever portion of the answer was completed.
+While waiting for the first token, `[step] generating answer...` is logged to stderr and `[generating]...` is written to the output file as a placeholder. Once the first token arrives, the file placeholder is removed by closing the file, stripping `[generating]...` via regex (`_remove_placeholder`), and reopening for append. Subsequent tokens are written in real-time. If interrupted (Ctrl+C), the file preserves the question and whatever portion of the answer was completed.
 
 ```text
 output/<sanitized_question>_<YYYYMMDD_HHMMSS>/
@@ -561,7 +562,7 @@ The model is cached to `~/.cache/huggingface/` after first download.
 | Config file not found | `[error]` + `[hint]`, exit code 1 |
 | No relevant chunks for a question | `[info]`, skip round |
 | `debug` flag enabled | `[debug]` retrieval details (query params, path, scores, previews) |
-| Build / query progress | `[step]` progress via `_timed()` context manager |
+| Build / query progress | `[step]` progress via `log_step()` from `lib/log.py` |
 | API network errors | `[retry]` 3x with backoff (1s, 2s, 4s); `[error]` after final failure |
 | Query enhancement failure | `[warn]`, fall back to original question |
 | Embedding model not cached | `[load]` download status, download from HuggingFace |

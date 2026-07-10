@@ -2,6 +2,8 @@ import time
 
 from openai import OpenAI
 
+from lib.log import log_error, log_retry
+
 MAX_RETRIES = 3
 RETRY_DELAYS = [1, 2, 4]
 
@@ -47,10 +49,10 @@ class LlmApi:
             except Exception as e:
                 if attempt < MAX_RETRIES - 1:
                     delay = RETRY_DELAYS[attempt]
-                    print(
-                        f"[retry {attempt + 1}/{MAX_RETRIES}] API call failed, retrying in {delay}s..."
+                    log_retry(
+                        f"[{attempt + 1}/{MAX_RETRIES}] API call failed, retrying in {delay}s..."
                     )
                     time.sleep(delay)
                 else:
-                    print(f"[error] API call failed: {e}")
+                    log_error(f"API call failed: {e}")
                     raise

@@ -13,7 +13,6 @@ from lib.engine import (  # noqa: E402
     load_config,
 )
 from rag_qa import _retrieve_context  # noqa: E402
-from tools import _mcp_safe  # noqa: E402
 from tools.shared_store import (  # noqa: E402
     get_enhancer,
     get_llm,
@@ -50,30 +49,27 @@ def rag_ask(
     # Override enhance if requested and not already configured
     query_enhancer = enhancer
     if enhance and not query_enhancer:
-        with _mcp_safe():
-            query_enhancer = init_enhancer(config)
+        query_enhancer = init_enhancer(config)
 
     retrieval_k = k or retrieval_cfg.get("k", 3)
 
-    with _mcp_safe():
-        chunks, messages, _, _ = _retrieve_context(
-            store,
-            llm,
-            question,
-            system_prompt,
-            retrieval_k=retrieval_k,
-            retrieval_distance_threshold=retrieval_cfg.get("distance_threshold"),
-            query_enhancer=query_enhancer,
-            reranker=reranker,
-            reranker_top_k=config.get("reranker", {}).get("top_k"),
-            debug=False,
-        )
+    chunks, messages, _, _ = _retrieve_context(
+        store,
+        llm,
+        question,
+        system_prompt,
+        retrieval_k=retrieval_k,
+        retrieval_distance_threshold=retrieval_cfg.get("distance_threshold"),
+        query_enhancer=query_enhancer,
+        reranker=reranker,
+        reranker_top_k=config.get("reranker", {}).get("top_k"),
+        debug=False,
+    )
 
     if not chunks:
         return "No relevant documents found."
 
     # Generate answer (non-streaming)
-    with _mcp_safe():
-        answer = llm.generate(messages)
+    answer = llm.generate(messages)
 
     return answer

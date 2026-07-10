@@ -1,3 +1,4 @@
+from lib.log import log_warn
 from lib.prompt_templates import build_enhancer_prompt
 
 
@@ -32,12 +33,12 @@ class QueryEnhancer:
             response = response.strip()
             if response:
                 return response
-            print(
-                f'[warn] enhancement returned empty for "{question[:60]}", using original question'
+            log_warn(
+                f'enhancement returned empty for "{question[:60]}", using original question'
             )
             return question
         except Exception as e:
-            print(
-                f'[warn] enhancement failed for "{question[:60]}": {e}, using original question'
+            log_warn(
+                f'enhancement failed for "{question[:60]}": {e}, using original question'
             )
             return question

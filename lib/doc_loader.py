@@ -4,6 +4,8 @@ import re
 
 import pathspec
 
+from lib.log import log_warn
+
 _IGNORE_FILE = ".doc_loader_ignore"
 
 _BREAK_PRIORITY = ["\n\n", "\n", "。", "！", "？", ".", "!", "?", " "]
@@ -113,8 +115,8 @@ def _parse_chunking_config(config: dict) -> dict:
             f"overlap_lines ({line_overlap}) must be < max_lines ({line_max})"
         )
     if line_overlap >= line_max // 2:
-        print(
-            f"[warn] overlap_lines ({line_overlap}) >= max_lines // 2 ({line_max // 2}); "
+        log_warn(
+            f"overlap_lines ({line_overlap}) >= max_lines // 2 ({line_max // 2}); "
             f"break-point search may not land on natural boundaries"
         )
 

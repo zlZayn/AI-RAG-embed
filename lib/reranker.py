@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from sentence_transformers import CrossEncoder
 
+from lib.log import log_debug
+
 
 class Reranker:
     """Cross-encoder reranker for precision re-ranking of retrieved chunks.
@@ -35,11 +37,11 @@ class Reranker:
         ranked = sorted(zip(chunks, scores), key=lambda pair: pair[1], reverse=True)
 
         if debug:
-            print("\n[debug] reranker scores")
+            log_debug("reranker scores")
             for i, (chunk, score) in enumerate(ranked):
                 kept = " *" if i < top_k else ""
-                print(f"[debug]   chunk {i + 1}: score={score:.4f}{kept}")
-                print(f"[debug]     preview: {chunk[:80]}...")
-            print(f"[debug]   (* = kept, top {top_k} of {len(chunks)})")
+                log_debug(f"  chunk {i + 1}: score={score:.4f}{kept}")
+                log_debug(f"    preview: {chunk[:80]}...")
+            log_debug(f"  (* = kept, top {top_k} of {len(chunks)})")
 
         return [chunk for chunk, _ in ranked[:top_k]]

@@ -329,11 +329,12 @@ output/                 # conversation exports (generated)
 servers/
 └── rag_server.py       # MCP server entry point (stdio transport)
 tools/
-├── __init__.py         # _mcp_safe() context manager
+├── __init__.py         # package marker (all logging via lib/log.py to stderr)
 ├── rag_search.py       # MCP tool: retrieve chunks without LLM
 ├── rag_ask.py          # MCP tool: retrieve + LLM answer
 └── rag_get_info.py     # MCP tool: system config and indexed documents
 lib/
+├── log.py              # unified logging (all progress/debug/error to stderr)
 ├── doc_loader.py       # file I/O + text chunking + ignore patterns
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)
 ├── vector_db.py        # Chroma vector store + hybrid retrieval

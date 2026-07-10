@@ -329,11 +329,12 @@ output/                 # 对话导出（生成）
 servers/
 └── rag_server.py       # MCP 服务器入口（stdio 传输）
 tools/
-├── __init__.py         # _mcp_safe() 上下文管理器
+├── __init__.py         # 包标记（所有日志通过 lib/log.py 输出到 stderr）
 ├── rag_search.py       # MCP 工具：仅检索片段
 ├── rag_ask.py          # MCP 工具：检索 + LLM 生成答案
 └── rag_get_info.py     # MCP 工具：系统配置与已索引文档
 lib/
+├── log.py              # 统一日志（所有进度/调试/错误输出到 stderr）
 ├── doc_loader.py       # 文件读取 + 文本分片 + 忽略规则
 ├── embed_engine.py     # 嵌入模型封装（sentence-transformers）
 ├── vector_db.py        # Chroma 向量存储 + 混合检索

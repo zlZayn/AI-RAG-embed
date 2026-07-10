@@ -20,13 +20,15 @@ from lib.engine import (
     get_retrieval_mode,
     init_enhancer,
     init_llm,
+    init_llm_class,
     init_reranker,
-    init_retrieval,
+    init_store,
     load_config,
     resolve_model_name,
     resolve_path,
     timed,
 )
+from lib.log import log_debug, log_error, log_info, log_step, log_warn
 from lib.prompt_templates import build_qa_messages, build_system_prompt
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -146,29 +148,29 @@ def _retrieve_context(
     rewritten_question = question
     enhance_label = "Enhanced Question"
 
-    print("[step] processing... ", end="", flush=True)
+    log_step("processing...")
 
     if query_enhancer:
         rewritten_question = query_enhancer.enhance(question, messages_history)
         enhance_label = query_enhancer.label
 
     if debug:
-        print(f"\n[debug] original question: {question}")
+        log_debug(f"original question: {question}")
         if rewritten_question != question:
-            print(f"[debug] rewritten question: {rewritten_question}")
-        print(
-            f"[debug] retrieval_k={retrieval_k}, threshold={retrieval_distance_threshold}"
+            log_debug(f"rewritten question: {rewritten_question}")
+        log_debug(
+            f"retrieval_k={retrieval_k}, threshold={retrieval_distance_threshold}"
         )
 
     # Retrieve more candidates when reranker will refine
     k_for_search = retrieval_k * 4 if reranker else retrieval_k
 
     if debug and reranker:
-        print(
-            f"[debug] reranker active: searching {k_for_search} candidates, will keep top {reranker_top_k or retrieval_k}"
+        log_debug(
+            f"reranker active: searching {k_for_search} candidates, will keep top {reranker_top_k or retrieval_k}"
         )
 
-    print("\r\033[K[step] retrieving... ", end="", flush=True)
+    log_step("retrieving...")
     chunks = store.query(
         rewritten_question,
         k=k_for_search,
@@ -177,18 +179,16 @@ def _retrieve_context(
     if not chunks:
         mode_tag = get_retrieval_mode(store)
         q = rewritten_question[:60]
-        print(
-            f'\r\033[K[info] no relevant chunks found for "{q}" [{mode_tag}], skipping\n'
-        )
+        log_info(f'no relevant chunks found for "{q}" [{mode_tag}], skipping')
         return RetrieveResult([], None, rewritten_question, enhance_label)
 
     # Rerank and trim to final retrieval_k
     if reranker:
-        print(f"\r\033[K[step] reranking {len(chunks)} chunks... ", end="", flush=True)
+        log_step(f"reranking {len(chunks)} chunks...")
         top_k = reranker_top_k or retrieval_k
         chunks = reranker.rerank(rewritten_question, chunks, top_k=top_k, debug=debug)
 
-    print(f"\r\033[K[step] retrieved {len(chunks)} chunks, generating...")
+    log_step(f"retrieved {len(chunks)} chunks, generating...")
 
     context = "\n\n".join(chunks)
     messages = build_qa_messages(system_prompt, question, context, messages_history)
@@ -198,8 +198,8 @@ def _retrieve_context(
 
 def _init_ask_chat(config: dict, debug: bool = False):
     """Initialize all components for ask/chat modes. Returns (store, llm, enhancer, system_prompt, reranker)."""
-    store, LlmApi = init_retrieval(config, debug=debug)
-    llm = init_llm(config, LlmApi)
+    store = init_store(config, debug=debug)
+    llm = init_llm(config, init_llm_class())
     query_enhancer = init_enhancer(config)
     reranker = init_reranker(config)
     system_prompt = build_system_prompt(config)
@@ -213,13 +213,12 @@ def _init_ask_chat(config: dict, debug: bool = False):
 
 def _stream_answer(llm, messages: list[dict], file=None) -> str:
     answer = ""
-    print("[step] generating answer...", end="", flush=True)
+    log_step("generating answer...")
     if file:
         file.write("[generating]...")
         file.flush()
     for token in llm.generate_stream(messages):
         if not answer:
-            print("\r\033[K", end="", flush=True)
             if file:
                 filepath = file.name
                 file.close()
@@ -251,7 +250,7 @@ def cmd_search(
     config: dict, question: str, use_enhancer: bool = False, debug: bool = False
 ) -> None:
     """Search only: retrieve document chunks without LLM generation."""
-    store, _ = init_retrieval(config, debug=debug)
+    store = init_store(config, debug=debug)
 
     retrieval_cfg = get_retrieval_cfg(config)
     distance_threshold = retrieval_cfg.get("distance_threshold")
@@ -259,24 +258,24 @@ def cmd_search(
 
     reranker_on = config.get("reranker_enabled", False)
     mode_tag = get_retrieval_mode(store)
-    print(
-        f"[info] retrieval: {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}"
+    log_info(
+        f"retrieval: {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}"
     )
     if debug:
-        print(
-            f"[debug] config: {build_indexing_summary(config)}, {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}, llm=search-only"
+        log_debug(
+            f"config: {build_indexing_summary(config)}, {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}, llm=search-only"
         )
 
     if use_enhancer:
         enhancer = init_enhancer(config)
         if enhancer:
             question = enhancer.enhance(question)
-            print(f"[info] {enhancer.label}: {question}")
+            log_info(f"{enhancer.label}: {question}")
 
     if debug:
-        print(f"\n[debug] original question: {original_question}")
+        log_debug(f"original question: {original_question}")
         if question != original_question:
-            print(f"[debug] rewritten question: {question}")
+            log_debug(f"rewritten question: {question}")
 
     reranker = init_reranker(config)
 
@@ -288,11 +287,11 @@ def cmd_search(
 
     if not chunks:
         mode_tag = get_retrieval_mode(store)
-        print(f'[info] no relevant chunks found for "{question[:60]}" [{mode_tag}]')
+        log_info(f'no relevant chunks found for "{question[:60]}" [{mode_tag}]')
         return
 
     if reranker:
-        print(f"\r\033[K[step] reranking {len(chunks)} chunks... ", end="", flush=True)
+        log_step(f"reranking {len(chunks)} chunks...")
         top_k = config.get("reranker", {}).get("top_k") or retrieval_k
         chunks = reranker.rerank(question, chunks, top_k=top_k, debug=debug)
 
@@ -314,12 +313,12 @@ def cmd_ask(
 
     reranker_on = config.get("reranker_enabled", False)
     mode_tag = get_retrieval_mode(store)
-    print(
-        f"[info] retrieval: {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}"
+    log_info(
+        f"retrieval: {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}"
     )
     if debug:
-        print(
-            f"[debug] config: {build_indexing_summary(config)}, {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}, llm={llm._model}"
+        log_debug(
+            f"config: {build_indexing_summary(config)}, {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}, llm={llm._model}"
         )
 
     chunks, messages, rewritten_question, enhance_label = _retrieve_context(
@@ -345,7 +344,7 @@ def cmd_ask(
     _stream_answer(llm, messages, file=f)
 
     _write_round_context(filepath, chunks)
-    print(f"\n[info] saved to {out_dir}")
+    log_info(f"saved to {out_dir}")
 
 
 def _has_file_changes(persist_dir: str, file_hashes: dict[str, str]) -> bool:
@@ -365,21 +364,21 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
     docs_dir = resolve_path(config, "docs_dir")
 
     if not os.path.isdir(docs_dir):
-        print(f"[error] docs directory not found: {docs_dir}")
-        print("[hint] check docs_dir in config.json, or create the directory")
+        log_error(f"docs directory not found: {docs_dir}")
+        log_error("hint: check docs_dir in config.json, or create the directory")
         sys.exit(1)
 
     with timed("Loading and chunking documents"):
         chunks, file_hashes = load_documents(docs_dir, config)
     if not chunks:
-        print("[error] no .txt or .md files found in docs directory")
+        log_error("no .txt or .md files found in docs directory")
         sys.exit(1)
-    print(
-        f"[info] {len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
+    log_info(
+        f"{len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
     )
-    print(f"[info] indexing: {build_indexing_summary(config)}")
+    log_info(f"indexing: {build_indexing_summary(config)}")
 
-    store, _ = init_retrieval(config)
+    store = init_store(config)
 
     if debug:
         mode_tag = get_retrieval_mode(store)
@@ -387,8 +386,8 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
         reranker_on = config.get("reranker_enabled", False)
         llm_model = config.get("llm", {}).get("model", "?")
         ret = build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)
-        print(
-            f"[debug] config: {build_indexing_summary(config)}, {ret}, llm={llm_model}"
+        log_debug(
+            f"config: {build_indexing_summary(config)}, {ret}, llm={llm_model}"
         )
 
     # Warn when embedding model changed
@@ -397,8 +396,8 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
         old_model = store.get_meta_model()
         new_model = resolve_model_name(config)
         if old_model and old_model != new_model:
-            print(f"[warn] model changed: {old_model} -> {new_model}")
-            print("[hint] run --rebuild to rebuild index with new model")
+            log_warn(f"model changed: {old_model} -> {new_model}")
+            log_warn("hint: run --rebuild to rebuild index with new model")
 
     if not force and not store.has_changes(file_hashes):
         # Check chunking config change — warn even if files unchanged
@@ -406,13 +405,13 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
         if old_chunking:
             new_chunking = build_indexing_summary(config)
             if old_chunking != new_chunking:
-                print(
-                    f"[warn] chunking config changed: {old_chunking} -> {new_chunking}"
+                log_warn(
+                    f"chunking config changed: {old_chunking} -> {new_chunking}"
                 )
-                print("[hint] run --rebuild to rebuild index with new chunking config")
+                log_warn("hint: run --rebuild to rebuild index with new chunking config")
 
-        print("[step] no changes detected, skipping")
-        print(f"[step] build complete [{time.perf_counter() - t0:.1f}s total]")
+        log_step("no changes detected, skipping")
+        log_step(f"build complete [{(time.perf_counter() - t0):.1f}s total]")
         return
 
     with timed("Building vector index"):
@@ -423,7 +422,7 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
 
     store.store_meta_value("_chunking", build_indexing_summary(config))
 
-    print(f"[step] build complete [{time.perf_counter() - t0:.1f}s total]")
+    log_step(f"build complete [{(time.perf_counter() - t0):.1f}s total]")
 
 
 def cmd_chat(config: dict, debug: bool = False) -> None:
@@ -435,12 +434,12 @@ def cmd_chat(config: dict, debug: bool = False) -> None:
 
     reranker_on = config.get("reranker_enabled", False)
     mode_tag = get_retrieval_mode(store)
-    print(
-        f"[info] retrieval: {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}"
+    log_info(
+        f"retrieval: {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}"
     )
     if debug:
-        print(
-            f"[debug] config: {build_indexing_summary(config)}, {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}, llm={llm._model}"
+        log_debug(
+            f"config: {build_indexing_summary(config)}, {build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)}, llm={llm._model}"
         )
 
     print("\nAsk a question. Be specific. /quit or /q to quit.\n")
@@ -454,7 +453,7 @@ def cmd_chat(config: dict, debug: bool = False) -> None:
         try:
             question = input(">>> ").strip()
         except (EOFError, KeyboardInterrupt):
-            print()
+            print(file=sys.stderr)
             break
 
         if not question:
@@ -559,20 +558,17 @@ def main() -> None:
         cmd_search(config, question, use_enhancer=args.enhance, debug=debug)
     elif args.build:
         if question:
-            print("[warn] question ignored with --build", file=sys.stderr)
+            log_warn("question ignored with --build")
         cmd_build(config, debug=debug)
     elif args.rebuild:
         if question:
-            print("[warn] question ignored with --rebuild", file=sys.stderr)
+            log_warn("question ignored with --rebuild")
         cmd_build(config, force=True, debug=debug)
     elif question:
         cmd_ask(config, question, use_enhancer=args.enhance, debug=debug)
     else:
         if args.enhance:
-            print(
-                "[warn] --enhance ignored without --search or question",
-                file=sys.stderr,
-            )
+            log_warn("--enhance ignored without --search or question")
         cmd_chat(config, debug=debug)
 
 
