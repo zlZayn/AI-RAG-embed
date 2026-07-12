@@ -43,9 +43,9 @@ _READONLY = {
     "openWorldHint": False,
 }
 
-mcp.tool(annotations=_READONLY)(rag_search)
-mcp.tool(annotations=_READONLY)(rag_ask)
-mcp.tool(annotations=_READONLY)(rag_get_info)
+mcp.tool(annotations=_READONLY)(rag_search)  # type: ignore[arg-type]
+mcp.tool(annotations=_READONLY)(rag_ask)  # type: ignore[arg-type]
+mcp.tool(annotations=_READONLY)(rag_get_info)  # type: ignore[arg-type]
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

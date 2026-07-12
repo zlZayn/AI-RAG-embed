@@ -840,7 +840,7 @@ def load_documents(docs_dir: str, config: dict) -> tuple[list[dict], dict]:
             # don't go through _chunk_section, so add defaults)
             for c in file_chunks:
                 c.setdefault("section", "")
-                c.setdefault("section_level", 0)
+                c.setdefault("section_level", 0)  # type: ignore[arg-type]
 
             chunks.extend(file_chunks)
 

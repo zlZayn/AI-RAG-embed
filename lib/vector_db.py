@@ -239,7 +239,7 @@ class VectorDb:
     # ------------------------------------------------------------------
 
     def query(
-        self, question: str, k: int = 3, distance_threshold: float = None
+        self, question: str, k: int = 3, distance_threshold: float | None = None
     ) -> list[str]:
         """Retrieve top-k document chunks."""
         if self._debug:
@@ -267,7 +267,7 @@ class VectorDb:
             return []
 
     def _vector_query(
-        self, question: str, k: int = 3, distance_threshold: float = None
+        self, question: str, k: int = 3, distance_threshold: float | None = None
     ) -> list[str]:
         """Vector-only retrieval."""
         question_embedding = self._embed_engine.get_embedding(question)
@@ -329,7 +329,7 @@ class VectorDb:
         return documents
 
     def _hybrid_query(
-        self, question: str, k: int = 3, distance_threshold: float = None
+        self, question: str, k: int = 3, distance_threshold: float | None = None
     ) -> list[str]:
         """Vector + BM25 hybrid retrieval with Reciprocal Rank Fusion."""
         # Vector search — fetch 2k candidates
