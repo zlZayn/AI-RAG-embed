@@ -8,7 +8,8 @@
 
 ## 常用命令
 - uv run python rag_qa.py --help
-- uv run --with pytest pytest tests/test_chunking.py -v
+- uv run python web.py（网页入口，http://localhost:5000）
+- uv run pytest tests/test_chunking.py -v
 
 ## 验证快照（2026-08-24）
 - pytest tests/test_chunking.py: 42 passed / 0 failed
