@@ -341,7 +341,7 @@ docs/
 └── ARCHITECTURE.md     # design philosophy, workflows, module internals
 tests/
 ├── test_chunking.py    # pytest: chunking design-property tests
-└── test_thinking.py    # ad-hoc API probe (needs network + API key)
+└── thinking_probe.py   # networked API probe (reads OPENAI_API_KEY env)
 servers/
 └── rag_server.py       # MCP server entry point (stdio transport)
 tools/

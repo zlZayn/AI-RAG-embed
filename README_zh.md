@@ -341,7 +341,7 @@ docs/
 └── ARCHITECTURE.md     # 设计哲学、工作流、模块内部实现
 tests/
 ├── test_chunking.py    # pytest：分块设计属性测试
-└── test_thinking.py    # 临时 API 探测脚本（需联网 + API key）
+└── thinking_probe.py   # 联网 API 探测脚本（读取 OPENAI_API_KEY 环境变量）
 servers/
 └── rag_server.py       # MCP 服务器入口（stdio 传输）
 tools/

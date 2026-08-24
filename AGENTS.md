@@ -13,15 +13,15 @@
 
 ## 验证快照（2026-08-24）
 - pytest tests/test_chunking.py: 42 passed / 0 failed
-- 其余测试未跑：test_thinking.py 为联网探测脚本
+- 其余测试未跑：thinking_probe.py 为联网探测脚本（凭据走 OPENAI_API_KEY 环境变量）
 
 ## 待办
-- [ ] 评估 tests/ 是否放开 .gitignore 跟踪
+- [ ] 无
 
 ## 活跃坑
 - HF 端点默认 hf-mirror.com，勿覆盖为 huggingface.co
 - documents/ 教科书 math 会被 check-links 误报为断链
-- tests/ 目录被 .gitignore 忽略，git 不跟踪
+- docs/ 与 tests/ 已放开 gitignore 跟踪（2026-08-24）
 
 ## 文档地图
 - 架构 → docs/ARCHITECTURE.md
