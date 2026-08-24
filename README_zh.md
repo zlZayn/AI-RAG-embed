@@ -83,6 +83,14 @@ python servers/rag_server.py          # stdio 传输（供 Agent 连接）
 }
 ```
 
+### Web UI
+
+Flask 包装层，每次请求以子进程调用 `rag_qa.py` 并将答案流式返回浏览器。
+
+```bash
+uv run python web.py   # 打开 http://localhost:5000
+```
+
 ## 使用方法
 
 ### 构建索引
@@ -321,7 +329,6 @@ output/
 
 ```text
 rag_qa.py               # 入口（--build | --rebuild | --search | 问题 | 交互）
-main.py                 # 脚手架占位（打印 hello；未接入 RAG）
 web.py                  # 基于 Flask 的 Web UI 包装（调用 rag_qa.py）
 config.json             # 你的配置（已 gitignore）
 config_example.json     # 配置模板

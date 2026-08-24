@@ -83,6 +83,14 @@ Three tools are registered:
 }
 ```
 
+### Web UI
+
+A Flask wrapper that runs `rag_qa.py` per request and streams the answer to the browser.
+
+```bash
+uv run python web.py   # open http://localhost:5000
+```
+
 ## Usage
 
 ### Build Index
@@ -321,7 +329,6 @@ Each round file contains the question, answer, processed question (labeled "Enha
 
 ```text
 rag_qa.py               # entry point (--build | --rebuild | --search | question | interactive)
-main.py                 # scaffold stub (prints hello; not wired into RAG)
 web.py                  # Flask web UI wrapper around rag_qa.py
 config.json             # your configuration (gitignored)
 config_example.json     # configuration template
