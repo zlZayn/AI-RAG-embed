@@ -11,7 +11,7 @@
 ### 1. 安装依赖
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### 2. 配置
@@ -321,20 +321,32 @@ output/
 
 ```text
 rag_qa.py               # 入口（--build | --rebuild | --search | 问题 | 交互）
+main.py                 # 脚手架占位（打印 hello；未接入 RAG）
+web.py                  # 基于 Flask 的 Web UI 包装（调用 rag_qa.py）
 config.json             # 你的配置（已 gitignore）
 config_example.json     # 配置模板
+templates/
+└── index.html          # Web UI 模板（web.py 使用）
 documents/              # 存放 .txt / .md / .typ 文件
 chroma_db/              # 持久化向量数据库（生成）
 output/                 # 对话导出（生成）
+docs/
+└── ARCHITECTURE.md     # 设计哲学、工作流、模块内部实现
+tests/
+├── test_chunking.py    # pytest：分块设计属性测试
+└── test_thinking.py    # 临时 API 探测脚本（需联网 + API key）
 servers/
 └── rag_server.py       # MCP 服务器入口（stdio 传输）
 tools/
 ├── __init__.py         # 包标记（所有日志通过 lib/log.py 输出到 stderr）
+├── shared_store.py     # MCP 工具共享 store 缓存
 ├── rag_search.py       # MCP 工具：仅检索片段
 ├── rag_ask.py          # MCP 工具：检索 + LLM 生成答案
 └── rag_get_info.py     # MCP 工具：系统配置与已索引文档
 lib/
+├── __init__.py         # 包标记
 ├── log.py              # 统一日志（所有进度/调试/错误输出到 stderr）
+├── engine.py           # 共享初始化与配置逻辑（CLI + MCP）
 ├── doc_loader.py       # 文件读取 + 文本分片 + 忽略规则
 ├── embed_engine.py     # 嵌入模型封装（sentence-transformers）
 ├── vector_db.py        # Chroma 向量存储 + 混合检索
@@ -342,15 +354,17 @@ lib/
 ├── llm_api.py          # 远程 LLM API 客户端（OpenAI 兼容）
 ├── query_enhancer.py   # 查询增强（检索优化改写）
 ├── local_translator.py # MarianMT 本地翻译后端
-└── reranker.py         # cross-encoder 精排重排序
+├── reranker.py         # cross-encoder 精排重排序
+└── prompt_templates.py # 系统提示词与消息组装
 ```
 
 ## 依赖要求
 
 ### Python 依赖
 
-- Python 3.10+
+- Python 3.11+（`.python-version` 固定 3.12.10）
 - `sentence-transformers`、`chromadb`、`openai`、`pathspec`（核心依赖）
+- `mcp[cli]`（MCP 服务器）、`flask`（Web UI）
 - `jieba`、`rank-bm25`（BM25 混合检索）
 - `transformers`、`sentencepiece`、`sacremoses`（仅 `mode: "local"` 需要）
 
@@ -383,4 +397,4 @@ Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | F
 
 ---
 
-详见 [ARCHITECTURE.md](ARCHITECTURE.md) 了解构建/查询工作流、模块内部实现和环境配置（`sentence-transformers` 版本）。
+详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 了解构建/查询工作流、模块内部实现和环境配置（`sentence-transformers` 版本）。

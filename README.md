@@ -11,7 +11,7 @@ Drop your `.txt`/`.md`/`.typ` files into `documents/`, embed them locally to bui
 ### 1. Install dependencies
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### 2. Configure
@@ -321,20 +321,32 @@ Each round file contains the question, answer, processed question (labeled "Enha
 
 ```text
 rag_qa.py               # entry point (--build | --rebuild | --search | question | interactive)
+main.py                 # scaffold stub (prints hello; not wired into RAG)
+web.py                  # Flask web UI wrapper around rag_qa.py
 config.json             # your configuration (gitignored)
 config_example.json     # configuration template
+templates/
+└── index.html          # web UI template (used by web.py)
 documents/              # put your .txt / .md / .typ files here
 chroma_db/              # persisted vector database (generated)
 output/                 # conversation exports (generated)
+docs/
+└── ARCHITECTURE.md     # design philosophy, workflows, module internals
+tests/
+├── test_chunking.py    # pytest: chunking design-property tests
+└── test_thinking.py    # ad-hoc API probe (needs network + API key)
 servers/
 └── rag_server.py       # MCP server entry point (stdio transport)
 tools/
 ├── __init__.py         # package marker (all logging via lib/log.py to stderr)
+├── shared_store.py     # shared store cache for MCP tools
 ├── rag_search.py       # MCP tool: retrieve chunks without LLM
 ├── rag_ask.py          # MCP tool: retrieve + LLM answer
 └── rag_get_info.py     # MCP tool: system config and indexed documents
 lib/
+├── __init__.py         # package marker
 ├── log.py              # unified logging (all progress/debug/error to stderr)
+├── engine.py           # shared init/config logic (CLI + MCP)
 ├── doc_loader.py       # file I/O + text chunking + ignore patterns
 ├── embed_engine.py     # embedding model wrapper (sentence-transformers)
 ├── vector_db.py        # Chroma vector store + hybrid retrieval
@@ -342,15 +354,17 @@ lib/
 ├── llm_api.py          # remote LLM API client (OpenAI-compatible)
 ├── query_enhancer.py   # query enhancement (retrieval-optimized rewriting)
 ├── local_translator.py # MarianMT local translation backend
-└── reranker.py         # cross-encoder reranker for precision re-ranking
+├── reranker.py         # cross-encoder reranker for precision re-ranking
+└── prompt_templates.py # system prompts + message assembly
 ```
 
 ## Requirements
 
 ### Dependencies
 
-- Python 3.10+
+- Python 3.11+ (pinned 3.12.10 via `.python-version`)
 - `sentence-transformers`, `chromadb`, `openai`, `pathspec` (core)
+- `mcp[cli]` (MCP server), `flask` (web UI)
 - `jieba`, `rank-bm25` (BM25 hybrid retrieval)
 - `transformers`, `sentencepiece`, `sacremoses` (only needed for `mode: "local"`)
 
@@ -383,4 +397,4 @@ Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | F
 
 ---
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for build/query workflow, module internals, and environment setup (`sentence-transformers` version).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for build/query workflow, module internals, and environment setup (`sentence-transformers` version).
