@@ -405,3 +405,5 @@ Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | F
 ---
 
 详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 了解构建/查询工作流、模块内部实现和环境配置（`sentence-transformers` 版本）。
+
+开发者/维护者：见 [AGENTS.md](AGENTS.md) 了解工作规则、测试命令与文档地图。

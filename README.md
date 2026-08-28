@@ -405,3 +405,5 @@ Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | F
 ---
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for build/query workflow, module internals, and environment setup (`sentence-transformers` version).
+
+Developers/maintainers: see [AGENTS.md](AGENTS.md) for working rules, test commands, and the doc map.
