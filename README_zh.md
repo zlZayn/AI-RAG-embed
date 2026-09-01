@@ -2,6 +2,17 @@
 
 [English](README.md) | [简体中文](README_zh.md)
 
+## 预览
+
+本地 RAG：CLI 构建检索与检索输出示例。
+
+![CLI — 构建索引与检索](screenshots/cli.png)
+
+<p align="center">
+  <img src="screenshots/output-top.png" alt="检索输出 — 上半" width="49%">
+  <img src="screenshots/output-bottom.png" alt="检索输出 — 下半" width="49%">
+</p>
+
 ## 概述
 
 将 `.txt`/`.md`/`.typ` 文件放入 `documents/` 目录，本地构建向量索引，然后基于你的文档内容向远程 LLM 提问获取答案。

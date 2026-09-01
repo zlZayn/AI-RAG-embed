@@ -2,6 +2,17 @@
 
 [English](README.md) | [简体中文](README_zh.md)
 
+## Preview
+
+Local RAG: CLI index build & retrieval, and retrieval output examples.
+
+![CLI — build index and retrieve](screenshots/cli.png)
+
+<p align="center">
+  <img src="screenshots/output-top.png" alt="Retrieval output — top" width="49%">
+  <img src="screenshots/output-bottom.png" alt="Retrieval output — bottom" width="49%">
+</p>
+
 ## Overview
 
 Drop your `.txt`/`.md`/`.typ` files into `documents/`, embed them locally to build the index, then ask questions and get answers from a remote LLM based on your content.
