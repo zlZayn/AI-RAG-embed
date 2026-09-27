@@ -320,9 +320,7 @@ class VectorDb:
             log_debug("BM25 retrieval details")
             for i, (idx, score) in enumerate(hits):
                 src = self._bm25_sources[idx] if idx < len(self._bm25_sources) else ""
-                log_debug(
-                    f"  chunk {i + 1}: bm25_score={score:.4f} [source: {src}]"
-                )
+                log_debug(f"  chunk {i + 1}: bm25_score={score:.4f} [source: {src}]")
                 log_debug(f"    preview: {self._bm25_texts[idx][:80]}...")
 
         return documents

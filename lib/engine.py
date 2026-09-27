@@ -60,7 +60,9 @@ def timed(label: str):
     """Print '[step] label... done [Xs]' around a block."""
     t0 = time.perf_counter()
     yield
-    print(f"[step] {label}... done [{(time.perf_counter() - t0):.1f}s]", file=sys.stderr)
+    print(
+        f"[step] {label}... done [{(time.perf_counter() - t0):.1f}s]", file=sys.stderr
+    )
 
 
 # ---------------------------------------------------------------------------

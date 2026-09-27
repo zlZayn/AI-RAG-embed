@@ -373,9 +373,7 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
     if not chunks:
         log_error("no .txt or .md files found in docs directory")
         sys.exit(1)
-    log_info(
-        f"{len(chunks)} chunks from {len({c['source'] for c in chunks})} files"
-    )
+    log_info(f"{len(chunks)} chunks from {len({c['source'] for c in chunks})} files")
     log_info(f"indexing: {build_indexing_summary(config)}")
 
     store = init_store(config)
@@ -386,9 +384,7 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
         reranker_on = config.get("reranker_enabled", False)
         llm_model = config.get("llm", {}).get("model", "?")
         ret = build_retrieval_summary(retrieval_cfg, reranker_on, mode_tag)
-        log_debug(
-            f"config: {build_indexing_summary(config)}, {ret}, llm={llm_model}"
-        )
+        log_debug(f"config: {build_indexing_summary(config)}, {ret}, llm={llm_model}")
 
     # Warn when embedding model changed
     vector_enabled = config.get("vector_enabled", True)
@@ -405,10 +401,10 @@ def cmd_build(config: dict, force: bool = False, debug: bool = False) -> None:
         if old_chunking:
             new_chunking = build_indexing_summary(config)
             if old_chunking != new_chunking:
+                log_warn(f"chunking config changed: {old_chunking} -> {new_chunking}")
                 log_warn(
-                    f"chunking config changed: {old_chunking} -> {new_chunking}"
+                    "hint: run --rebuild to rebuild index with new chunking config"
                 )
-                log_warn("hint: run --rebuild to rebuild index with new chunking config")
 
         log_step("no changes detected, skipping")
         log_step(f"build complete [{(time.perf_counter() - t0):.1f}s total]")
