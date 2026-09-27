@@ -10,9 +10,12 @@
 - uv run python rag_qa.py --help
 - uv run python web.py（网页入口，http://localhost:5000）
 - uv run pytest tests/test_chunking.py -v
+- uv run ruff check .（Lint；ruff 默认规则集，列宽默认 88）
+- uv run ruff format .（格式化；`--check` 只看不改）
 
-## 验证快照（2026-08-24）
+## 验证快照（2026-09-27）
 - pytest tests/test_chunking.py: 42 passed / 0 failed
+- Ruff: `check` 0 发现；`format --check` 全绿（全量格式化已落地）
 - 其余测试未跑：thinking_probe.py 为联网探测脚本（凭据走 OPENAI_API_KEY 环境变量）
 
 ## 待办

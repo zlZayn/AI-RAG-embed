@@ -7,6 +7,7 @@ Scrapes all pages from https://r4ds.hadley.nz/ and organizes by chapter.
 import subprocess
 import time
 from pathlib import Path
+
 from bs4 import BeautifulSoup
 
 OUTPUT_DIR = Path(__file__).parent
@@ -67,6 +68,7 @@ def fetch_with_curl(url):
     try:
         result = subprocess.run(
             ["curl", "-s", "-L", "--max-time", "30", url],
+            check=False,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -74,7 +76,7 @@ def fetch_with_curl(url):
             timeout=35,
         )
         return result.stdout if result.returncode == 0 else None
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:  # curl 缺失 / 超时 / 非零退出
         print(f"Curl error: {e}")
         return None
 

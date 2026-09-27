@@ -43,7 +43,7 @@ MESSAGES = [
 
 
 def probe(label, extra_body):
-    kwargs = dict(model=MODEL, messages=MESSAGES, stream=True)
+    kwargs = {"model": MODEL, "messages": MESSAGES, "stream": True}
     if extra_body is not None:
         kwargs["extra_body"] = extra_body
 

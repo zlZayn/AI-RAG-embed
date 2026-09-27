@@ -36,7 +36,7 @@ def load_config() -> dict:
 def resolve_path(config: dict, key: str) -> str:
     """Resolve a config path value. Relative paths (./) are resolved against the project root."""
     path = config[key]
-    if path.startswith("./") or path.startswith(".\\"):
+    if path.startswith(("./", ".\\")):
         return os.path.join(_PROJECT_DIR, path[2:])
     return path
 

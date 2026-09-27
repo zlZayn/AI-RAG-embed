@@ -37,7 +37,7 @@ class QueryEnhancer:
                 f'enhancement returned empty for "{question[:60]}", using original question'
             )
             return question
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 增强失败只需降级为原问题：异常面跨 LLM SDK / 解析
             log_warn(
                 f'enhancement failed for "{question[:60]}": {e}, using original question'
             )

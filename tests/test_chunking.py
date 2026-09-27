@@ -624,7 +624,7 @@ def test_empty_document():
             f.write("   \n\n  \n")
 
         cfg = make_config(200, min_chars=5)
-        chunks, hashes = load_documents(tmpdir, cfg)
+        chunks, _hashes = load_documents(tmpdir, cfg)
         assert len(chunks) == 0, f"expected 0 chunks, got {len(chunks)}"
 
 
@@ -737,7 +737,7 @@ def test_real_file_quality():
         return
 
     cfg = make_config(400, min_chars=30)
-    chunks, hashes = load_documents(docs_dir, cfg)
+    chunks, _hashes = load_documents(docs_dir, cfg)
     if not chunks:
         return
 

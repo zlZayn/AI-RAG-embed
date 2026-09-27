@@ -7,12 +7,12 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from lib.engine import (  # noqa: E402
+from lib.engine import (
     get_retrieval_cfg,
     init_enhancer,
     load_config,
 )
-from tools.shared_store import get_reranker, get_store  # noqa: E402
+from tools.shared_store import get_reranker, get_store
 
 
 def rag_search(

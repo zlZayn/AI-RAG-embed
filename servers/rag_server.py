@@ -19,11 +19,12 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
-from tools.rag_ask import rag_ask  # noqa: E402
-from tools.rag_get_info import rag_get_info  # noqa: E402
-from tools.rag_search import rag_search  # noqa: E402
-from tools.shared_store import warm_up  # noqa: E402
+from mcp.server.fastmcp import FastMCP
+
+from tools.rag_ask import rag_ask
+from tools.rag_get_info import rag_get_info
+from tools.rag_search import rag_search
+from tools.shared_store import warm_up
 
 
 @asynccontextmanager

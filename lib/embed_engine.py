@@ -16,7 +16,7 @@ class EmbedEngine:
     def __init__(self, model_name: str, lang: str = "en"):
         try:
             self._model = SentenceTransformer(model_name, local_files_only=True)
-        except Exception:
+        except Exception:  # noqa: BLE001 — 先试本地缓存再回退下载：本地加载失败面跨 HF hub / 文件系统 / 版本，收窄会变成崩溃而不是回退
             log_load(f"downloading embedding model: {model_name}")
             self._model = SentenceTransformer(model_name)
         self._query_prefix = _QUERY_PREFIXES.get(lang, _QUERY_PREFIXES["en"])

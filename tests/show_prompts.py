@@ -15,11 +15,11 @@ def main() -> None:
         sys.path.insert(0, _project_root)
 
     from lib.prompt_templates import (
+        _SYSTEM_PROMPT_LAX,
+        _SYSTEM_PROMPT_STRICT,
         ENHANCER_PROMPT,
         ENHANCER_PROMPT_WITH_HISTORY,
         SYSTEM_PROMPT_DEFAULT,
-        _SYSTEM_PROMPT_LAX,
-        _SYSTEM_PROMPT_STRICT,
     )
 
     _W = 74

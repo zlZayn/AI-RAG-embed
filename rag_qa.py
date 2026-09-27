@@ -54,7 +54,7 @@ def _init_output_dir(first_question: str) -> str:
     os.makedirs(output_root, exist_ok=True)
 
     prefix = _sanitize_name(first_question)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
     dirname = f"{prefix}_{stamp}"
     dirpath = os.path.join(output_root, dirname)
     os.makedirs(dirpath, exist_ok=True)
@@ -218,12 +218,12 @@ def _stream_answer(llm, messages: list[dict], file=None) -> str:
         file.write("[generating]...")
         file.flush()
     for token in llm.generate_stream(messages):
-        if not answer:
-            if file:
-                filepath = file.name
-                file.close()
-                _remove_placeholder(filepath)
-                file = open(filepath, "a", encoding="utf-8")
+        if not answer and file:
+            filepath = file.name
+            file.close()
+            _remove_placeholder(filepath)
+            # 句柄要跨越整个流式循环，不能收进 with
+            file = open(filepath, "a", encoding="utf-8")  # noqa: SIM115
         print(token, end="", flush=True)
         answer += token
         if file:
@@ -340,8 +340,8 @@ def cmd_ask(
     filepath = os.path.join(out_dir, "01_round.md")
 
     _write_round_header(filepath, 1, question, rewritten_question, enhance_label)
-    f = open(filepath, "a", encoding="utf-8")
-    _stream_answer(llm, messages, file=f)
+    with open(filepath, "a", encoding="utf-8") as f:
+        _stream_answer(llm, messages, file=f)
 
     _write_round_context(filepath, chunks)
     log_info(f"saved to {out_dir}")
@@ -486,8 +486,8 @@ def cmd_chat(config: dict, debug: bool = False) -> None:
         _write_round_header(
             filepath, round_index, question, rewritten_question, enhance_label
         )
-        f = open(filepath, "a", encoding="utf-8")
-        answer = _stream_answer(llm, messages, file=f)
+        with open(filepath, "a", encoding="utf-8") as f:
+            answer = _stream_answer(llm, messages, file=f)
 
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})

@@ -241,8 +241,7 @@ def _load_fixed_by_lines(
         if break_idx >= len(lines):
             break
         next_start = break_idx - overlap_lines
-        if next_start < 0:
-            next_start = 0
+        next_start = max(next_start, 0)
         if next_start <= start:
             next_start = start + 1
         start = next_start
@@ -610,11 +609,9 @@ def _extract_typst_paragraph(lines: list[str], start: int) -> tuple[str, int]:
             break
         if (
             TYPST_HEADING_RE.match(line)
-            or line.startswith(CODE_FENCE)
+            or line.startswith((CODE_FENCE, "- ", "+ "))
             or re.match(r"\s*#(figure|table)\s*\(", line)
             or re.match(r"\s*#quote\s*\(", line)
-            or line.startswith("- ")
-            or line.startswith("+ ")
         ):
             break
         end += 1
@@ -733,10 +730,8 @@ def _parse_typst(text: str) -> list[dict]:
             continue
 
         # Skip non-content: comments, style rules, code
-        if (
-            stripped.startswith("//")
-            or re.match(r"^#(set|show|let|hr|pagebreak|v|h|import|include)\b", stripped)
-            or stripped.startswith("#{")
+        if stripped.startswith(("//", "#{")) or re.match(
+            r"^#(set|show|let|hr|pagebreak|v|h|import|include)\b", stripped
         ):
             i += 1
             continue

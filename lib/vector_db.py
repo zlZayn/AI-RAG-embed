@@ -205,7 +205,6 @@ class VectorDb:
     def rebuild_full(self, chunks: list[dict], file_hashes: dict[str, str]) -> None:
         if self._vector_enabled:
             texts = [c["text"] for c in chunks]
-            sources = [c["source"] for c in chunks]
             ids = [str(i) for i in range(len(chunks))]
 
             embeddings = self._embed_engine.embed_batch(texts)

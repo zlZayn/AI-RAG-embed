@@ -10,8 +10,8 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from lib.doc_loader import _collect_ignore_specs, _is_ignored  # noqa: E402
-from lib.engine import (  # noqa: E402
+from lib.doc_loader import _collect_ignore_specs, _is_ignored
+from lib.engine import (
     build_indexing_summary,
     build_retrieval_summary,
     get_retrieval_cfg,
@@ -19,7 +19,7 @@ from lib.engine import (  # noqa: E402
     load_config,
     resolve_path,
 )
-from tools.shared_store import get_store  # noqa: E402
+from tools.shared_store import get_store
 
 
 def _list_source_files(docs_dir: str) -> list[str]:

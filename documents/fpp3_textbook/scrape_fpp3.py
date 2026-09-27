@@ -7,6 +7,7 @@ Scrapes all pages from https://otexts.com/fpp3/ and preserves section numbers li
 import subprocess
 import time
 from pathlib import Path
+
 from bs4 import BeautifulSoup
 
 # Output directory
@@ -202,12 +203,13 @@ def fetch_with_curl(url):
     try:
         result = subprocess.run(
             ["curl", "-s", "-L", "--max-time", "30", url],
+            check=False,
             capture_output=True,
             text=True,
             timeout=35,
         )
         return result.stdout if result.returncode == 0 else None
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:  # curl 缺失 / 超时 / 非零退出
         print(f"Curl error: {e}")
         return None
 
@@ -296,7 +298,7 @@ def main():
 
         # Fetch and extract
         html = fetch_with_curl(url)
-        title, content = extract_content(html)
+        _title, content = extract_content(html)
 
         if content:
             filename = get_filename(section_num, slug)

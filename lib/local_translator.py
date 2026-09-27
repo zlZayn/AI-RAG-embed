@@ -1,4 +1,5 @@
 import os
+from typing import ClassVar
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -8,7 +9,7 @@ from lib.log import log_load
 
 
 class LocalTranslator:
-    _cache: dict[str, tuple[MarianTokenizer, MarianMTModel]] = {}
+    _cache: ClassVar[dict[str, tuple[MarianTokenizer, MarianMTModel]]] = {}
 
     def __init__(self, query_lang: str, docs_lang: str, model_name: str | None = None):
         if model_name is None:
@@ -24,7 +25,7 @@ class LocalTranslator:
                     model_name, local_files_only=True
                 )
                 model = MarianMTModel.from_pretrained(model_name, local_files_only=True)
-            except Exception:
+            except Exception:  # noqa: BLE001 — 先试本地缓存再回退下载：本地加载失败面跨 HF hub / 文件系统 / 版本，收窄会变成崩溃而不是回退
                 log_load(f"downloading translation model: {model_name}")
                 tokenizer = MarianTokenizer.from_pretrained(model_name)
                 model = MarianMTModel.from_pretrained(model_name)
