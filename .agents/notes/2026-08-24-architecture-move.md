@@ -1,6 +1,6 @@
 # 决策：架构文档移入 docs/ARCHITECTURE.md（2026-08-24）
 
-已实施：是
+状态：生效
 
 ## 问题
 根目录 ARCHITECTURE.md 不符合 maintenance-flow 规范（架构文档统一放 docs/ARCHITECTURE.md，根目录只留指针）。
