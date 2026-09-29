@@ -418,21 +418,3 @@ Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | F
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for build/query workflow, module internals, and environment setup (`sentence-transformers` version).
 
 Developers/maintainers: see [AGENTS.md](AGENTS.md) for working rules, test commands, and the doc map.
-
----
-
-## Local commit hook (pre-commit)
-
-Auto-fixes formatting and lint before each commit (seconds only; tests and type checks stay in CI).
-Prerequisite: uv and pre-commit (`uv tool install pre-commit` puts the shim in `~/.local/bin`).
-
-```bash
-uv tool install pre-commit
-pre-commit install
-```
-
-> Restart the terminal (or reload the shell config) for PATH to take effect.
-
-- Run over everything: `pre-commit run --all-files`
-- Skip one commit: `git commit --no-verify`
-- Definition: [.pre-commit-config.yaml](.pre-commit-config.yaml) (the same ruff config the read-only CI uses)

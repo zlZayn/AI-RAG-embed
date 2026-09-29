@@ -8,7 +8,7 @@
 
 ## 常用命令
 
-- 本地钩子：`pre-commit install`（每个 clone 一次；本体 `uv tool install pre-commit`）——提交前自动 `ruff check --fix` + `ruff format`；CI 只读跑同一组检查
+- 本地钩子：`pre-commit install`（每个 clone 一次；本体 `uv tool install pre-commit`）——提交前自动 `ruff check --fix` + `ruff format`；CI 只读跑同一组检查；全量跑 `pre-commit run --all-files`；临时跳过 `git commit --no-verify`；定义见 [.pre-commit-config.yaml](.pre-commit-config.yaml)
 - uv run python rag_qa.py --help
 - uv run python web.py（网页入口，http://localhost:5000）
 - uv run pytest tests/test_chunking.py -v
@@ -25,7 +25,7 @@
 
 ## 活跃坑
 - HF 端点默认 hf-mirror.com，勿覆盖为 huggingface.co
-- documents/ 教科书 math 会被 check-links 误报为断链
+- documents/ 教科书 math 会被 check-links 误报为断链；plan/ 规划稿同类 —— 跑校验时加 `--exclude documents --exclude plan`
 - docs/ 与 tests/ 已放开 gitignore 跟踪（2026-08-24）
 
 ## 文档地图
