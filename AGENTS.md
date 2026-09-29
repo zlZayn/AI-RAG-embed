@@ -7,6 +7,8 @@
 - 决策记录 → [.agents/notes/](.agents/notes/)
 
 ## 常用命令
+
+- 本地钩子：`pre-commit install`（每个 clone 一次；本体 `uv tool install pre-commit`）——提交前自动 `ruff check --fix` + `ruff format`；CI 只读跑同一组检查
 - uv run python rag_qa.py --help
 - uv run python web.py（网页入口，http://localhost:5000）
 - uv run pytest tests/test_chunking.py -v

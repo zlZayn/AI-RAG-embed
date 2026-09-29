@@ -1,0 +1,45 @@
+# CI —— 只读质检：不写回仓库，不做任何发布动作。
+#
+# 为什么安装用 `--only-group dev`（而不是本机其余 Python 仓的 `--group dev`）：
+#   本仓运行期依赖含 chromadb / sentence-transformers / transformers（会拉 torch 系，
+#   安装量在 GB 级），而这条 CI 只做 lint —— 没有任何一步 import 运行期依赖。
+#   `--only-group dev` 只装 dev 组（ruff），既省掉那份下载，又保持
+#   「Ruff 版本来自 pyproject dev 组 + 锁在 uv.lock」这一单一来源不变。
+#
+# 为什么不跑 pytest：按本次改造的统一口径，本仓 CI 只跑 ruff（见改造指令 Q1-A）。
+#   本仓 tests/ 只有 test_chunking.py 一个用例文件，且其断言与 chromadb 无关；
+#   要收进 CI 属另一件事，本文件不擅自加。
+#
+# 判据单一来源：
+#   - Ruff 版本来自 pyproject.toml 的 [dependency-groups] dev，锁在 uv.lock；
+#   - Python 版本来自仓内 .python-version（由 uv 解析）；
+#   - 安装统一 `--frozen`：锁文件与 pyproject 不同步时直接红。
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dev dependencies (frozen, dev group only)
+        run: uv sync --frozen --only-group dev
+
+      - name: Ruff check
+        run: uv run --no-sync ruff check .
+
+      - name: Ruff format check
+        run: uv run --no-sync ruff format --check .
