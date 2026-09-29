@@ -1,5 +1,7 @@
 # AI-RAG-embed
 
+[![CI](https://github.com/zlZayn/AI-RAG-embed/actions/workflows/ci.yml/badge.svg)](https://github.com/zlZayn/AI-RAG-embed/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 [English](README.md) | [简体中文](README_zh.md)
 
 ## 预览
@@ -418,3 +420,15 @@ Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | F
 详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 了解构建/查询工作流、模块内部实现和环境配置（`sentence-transformers` 版本）。
 
 开发者/维护者：见 [AGENTS.md](AGENTS.md) 了解工作规则、测试命令与文档地图。
+
+---
+
+## 许可
+
+- 本仓基于 [MIT 许可](LICENSE) 发布。
+
+## 贡献
+
+- 本仓为个人项目；问题与建议请走 [Issues](https://github.com/zlZayn/AI-RAG-embed/issues)。
+
+维护者文档地图 → 见 [AGENTS.md](AGENTS.md)。

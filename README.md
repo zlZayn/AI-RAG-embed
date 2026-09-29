@@ -1,5 +1,7 @@
 # AI-RAG-embed
 
+[![CI](https://github.com/zlZayn/AI-RAG-embed/actions/workflows/ci.yml/badge.svg)](https://github.com/zlZayn/AI-RAG-embed/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 [English](README.md) | [简体中文](README_zh.md)
 
 ## Preview
@@ -418,3 +420,15 @@ Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--*" -Directory | F
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for build/query workflow, module internals, and environment setup (`sentence-transformers` version).
 
 Developers/maintainers: see [AGENTS.md](AGENTS.md) for working rules, test commands, and the doc map.
+
+---
+
+## License
+
+- Released under the [MIT License](LICENSE).
+
+## Contributing
+
+- Personal project; questions and suggestions welcome via [Issues](https://github.com/zlZayn/AI-RAG-embed/issues).
+
+Maintainer docs map → [AGENTS.md](AGENTS.md).
